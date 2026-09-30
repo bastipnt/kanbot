@@ -6,6 +6,7 @@ struct LoginView: View {
     @State private var name = ""
     @State private var email = ""
     @State private var password = ""
+    @State private var inviteCode = ""
 
     var body: some View {
         @Bindable var model = model
@@ -45,9 +46,20 @@ struct LoginView: View {
                         .textContentType(isRegistering ? .newPassword : .password)
                         .onSubmit(submit)
                 }
+                if isRegistering {
+                    Section {
+                        TextField("Invite code (optional)", text: $inviteCode)
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                    } footer: {
+                        Text("Needed if the server only allows invited users.")
+                    }
+                }
             }
             .formStyle(.grouped)
-            .frame(maxWidth: 420, maxHeight: isRegistering ? 330 : 280)
+            .frame(maxWidth: 420, maxHeight: isRegistering ? 430 : 280)
             .scrollDisabled(true)
 
             if let error = model.lastError {
@@ -84,6 +96,10 @@ struct LoginView: View {
 
     private func submit() {
         guard canSubmit else { return }
-        Task { await model.signIn(email: email, password: password, name: isRegistering ? name : nil, register: isRegistering) }
+        let code = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            await model.signIn(email: email, password: password, name: isRegistering ? name : nil,
+                               inviteToken: isRegistering && !code.isEmpty ? code : nil, register: isRegistering)
+        }
     }
 }

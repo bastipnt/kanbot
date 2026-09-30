@@ -1,0 +1,129 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "docs/**"
+      - "docker-compose.prod.yml"
+      - "infra/deploy/**"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/server.yml"
+  workflow_dispatch:
+
+# One deploy at a time, never cancelled midway. Deliberately not derived from
+# github.workflow: the reused server workflow's group would collide with it.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/server.yml
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/kanbot-server
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: server
+          file: server/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,scope=server,mode=max
+          platforms: linux/amd64
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    env:
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          sparse-checkout: |
+            docker-compose.prod.yml
+            infra/deploy/remote-deploy.sh
+          sparse-checkout-cone-mode: false
+
+      # Host key is pinned via DEPLOY_KNOWN_HOSTS (output of
+      # `ssh-keyscan -p <port> <host>`), so a spoofed host is rejected.
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          {
+            echo "Host deploy"
+            echo "  HostName $DEPLOY_HOST"
+            echo "  Port ${DEPLOY_PORT:-22}"
+            echo "  User $DEPLOY_USER"
+            echo "  IdentityFile ~/.ssh/deploy_key"
+            echo "  IdentitiesOnly yes"
+            echo "  StrictHostKeyChecking yes"
+          } > ~/.ssh/config
+
+      # Ship the compose file with every deploy so the host never runs a stale one.
+      - name: Upload compose file
+        run: scp docker-compose.prod.yml "deploy:${DEPLOY_PATH}/docker-compose.prod.yml"
+
+      - name: Deploy
+        run: |
+          # Expanded locally on purpose; %q quotes the values for the remote shell.
+          # shellcheck disable=SC2029
+          ssh deploy "DEPLOY_PATH=$(printf %q "$DEPLOY_PATH") IMAGE_TAG=$(printf %q "$IMAGE_TAG") bash -s" \
+            < infra/deploy/remote-deploy.sh
+
+      # The deploy script can exit 0 without having rolled anything out (e.g. a
+      # command swallowing its stdin), so check the host's actual state.
+      - name: Verify deployment
+        run: |
+          # shellcheck disable=SC2029
+          ssh deploy "cd $(printf %q "$DEPLOY_PATH") && cat .deployed-tag && docker compose -f docker-compose.prod.yml --env-file .env.production ps --status running --format '{{.Service}} {{.Image}}'" > state.txt
+          cat state.txt
+          deployed=$(head -n 1 state.txt)
+          if [ "$deployed" != "$IMAGE_TAG" ]; then
+            echo "::error::.deployed-tag is '${deployed}', expected '${IMAGE_TAG}'"
+            exit 1
+          fi
+          if ! grep -qE "^server .*/kanbot-server:${IMAGE_TAG}$" state.txt; then
+            echo "::error::server is not running kanbot-server:${IMAGE_TAG}"
+            exit 1
+          fi

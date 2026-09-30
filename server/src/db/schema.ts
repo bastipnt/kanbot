@@ -97,6 +97,22 @@ export const invites = pgTable(
   (t) => [uniqueIndex("invites_token_hash_idx").on(t.tokenHash)],
 );
 
+/** Server-wide single-use invites to create an account while registration is disabled (created via CLI). */
+export const signupInvites = pgTable(
+  "signup_invites",
+  {
+    id: id(),
+    tokenHash: text("token_hash").notNull(),
+    /** When set, only this (normalized) email may register with the invite. */
+    email: text("email"),
+    expiresAt: ts("expires_at").notNull(),
+    usedBy: uuid("used_by").references(() => users.id, { onDelete: "set null" }),
+    usedAt: ts("used_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("signup_invites_token_hash_idx").on(t.tokenHash)],
+);
+
 export const boards = pgTable(
   "boards",
   {

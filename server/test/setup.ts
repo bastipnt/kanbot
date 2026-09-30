@@ -7,5 +7,5 @@ import { runMigrations } from "../src/db/migrate.ts";
 
 await runMigrations();
 await sqlClient.unsafe(
-  "TRUNCATE users, refresh_tokens, workspaces, workspace_members, invites, boards, columns, tasks, comments, api_keys, events CASCADE",
+  "TRUNCATE users, refresh_tokens, workspaces, workspace_members, invites, signup_invites, boards, columns, tasks, comments, api_keys, events CASCADE",
 );

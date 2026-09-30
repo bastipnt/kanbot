@@ -44,10 +44,11 @@ public actor APIClient {
 
     // MARK: Auth
 
-    public func register(email: String, password: String, name: String) async throws -> User {
-        let r: AuthResponse = try await send("POST", "/auth/register",
-                                             body: ["email": .string(email), "password": .string(password), "name": .string(name)],
-                                             authenticated: false)
+    /// `inviteToken` is required when the server has registration disabled (signup invite from `bun run invite:create`).
+    public func register(email: String, password: String, name: String, inviteToken: String? = nil) async throws -> User {
+        var body: [String: JSONValue] = ["email": .string(email), "password": .string(password), "name": .string(name)]
+        if let inviteToken { body["inviteToken"] = .string(inviteToken) }
+        let r: AuthResponse = try await send("POST", "/auth/register", body: .object(body), authenticated: false)
         adopt(r)
         return r.user
     }

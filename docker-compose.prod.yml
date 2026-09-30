@@ -1,0 +1,57 @@
+name: kanbot
+
+services:
+  server:
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/kanbot-server:${IMAGE_TAG:-latest}
+    # The host Caddy (caddy-docker-proxy) terminates TLS and proxies here over
+    # caddy_network (WebSocket upgrades included); no host port is published.
+    labels:
+      caddy: ${PUBLIC_HOSTNAME:?PUBLIC_HOSTNAME is required}
+      caddy.reverse_proxy: "{{upstreams 8787}}"
+      caddy.header.Strict-Transport-Security: "max-age=31536000"
+    environment:
+      DATABASE_URL: postgres://kanbot:${POSTGRES_PASSWORD}@db:5432/kanbot
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      PUBLIC_URL: https://${PUBLIC_HOSTNAME}
+      PORT: "8787"
+      # New accounts need a signup invite: see README "Invite users".
+      REGISTRATION_DISABLED: ${REGISTRATION_DISABLED:-true}
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"fetch('http://127.0.0.1:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # Migrations run on start.
+      start_period: 60s
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - caddy_network
+      - kanbot_network
+    restart: unless-stopped
+
+  db:
+    image: postgres:17
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: kanbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: kanbot
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kanbot -d kanbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - kanbot_network
+    restart: unless-stopped
+
+networks:
+  caddy_network:
+    external: true
+  kanbot_network:
+
+volumes:
+  pgdata:

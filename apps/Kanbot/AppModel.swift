@@ -51,7 +51,7 @@ final class AppModel {
         }
     }
 
-    func signIn(email: String, password: String, name: String?, register: Bool) async {
+    func signIn(email: String, password: String, name: String?, inviteToken: String? = nil, register: Bool) async {
         guard let url = serverURL else { lastError = "Enter a valid server URL (http:// or https://)"; return }
         UserDefaults.standard.set(url.absoluteString, forKey: "serverURL")
         let api = makeClient(url)
@@ -59,7 +59,7 @@ final class AppModel {
         defer { isBusy = false }
         do {
             if register, let name {
-                user = try await api.register(email: email, password: password, name: name)
+                user = try await api.register(email: email, password: password, name: name, inviteToken: inviteToken)
             } else {
                 user = try await api.login(email: email, password: password)
             }

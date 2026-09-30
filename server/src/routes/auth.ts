@@ -9,7 +9,10 @@ import * as auth from "../services/auth.ts";
 export const authRoutes = new Hono<AppEnv>()
   .post(
     "/auth/register",
-    validate("json", z.object({ email: s.email, password: s.password, name: s.name })),
+    validate(
+      "json",
+      z.object({ email: s.email, password: s.password, name: s.name, inviteToken: z.string().min(1).max(256).optional() }),
+    ),
     async (c) => c.json(await auth.register(c.req.valid("json"))),
   )
   .post(

@@ -6,7 +6,7 @@ import { ApiError, badRequest, conflict, notFound } from "../lib/errors.ts";
 import { computePosition, type Placement } from "../lib/position.ts";
 import { actorOf, type Principal } from "../lib/principal.ts";
 import { toComment, toTask, type Comment, type Task } from "../lib/serialize.ts";
-import { authorize, loadBoard, loadTask } from "./access.ts";
+import { authorize, loadBoard, loadTask, requireUser } from "./access.ts";
 import { lockedBoard } from "./boards.ts";
 import { boardColumns, resolveColumn } from "./columns.ts";
 import { mutate } from "./events.ts";
@@ -137,6 +137,7 @@ export async function moveTask(p: Principal, taskId: string, input: { column: st
 
 export async function deleteTask(p: Principal, taskId: string): Promise<void> {
   const { workspaceId } = await loadTask(p, taskId);
+  requireUser(p);
   await mutate(workspaceId, actorOf(p), async (tx, emit) => {
     const deleted = await tx.delete(tasks).where(eq(tasks.id, taskId)).returning({ id: tasks.id });
     if (deleted.length === 0) throw notFound("Task");

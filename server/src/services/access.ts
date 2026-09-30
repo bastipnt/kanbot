@@ -45,6 +45,11 @@ export async function authorize(p: Principal, workspaceId: string, minRole: Role
   return row.role;
 }
 
+/** Destructive operations (deleting tasks/columns/boards) are reserved for user accounts. */
+export function requireUser(p: Principal): void {
+  if (p.kind !== "user") throw forbidden("This action requires a user account");
+}
+
 export async function loadBoard(p: Principal, boardId: string, ex: Executor = db): Promise<BoardRow> {
   if (!isUuid(boardId)) throw notFound("Board");
   const [board] = await ex.select().from(boards).where(eq(boards.id, boardId));

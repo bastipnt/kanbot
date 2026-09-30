@@ -5,7 +5,7 @@ import { ApiError, notFound } from "../lib/errors.ts";
 import { initialPositions } from "../lib/position.ts";
 import { actorOf, type Principal } from "../lib/principal.ts";
 import { toBoard, toColumn, toTask, type Board, type Column, type Task } from "../lib/serialize.ts";
-import { authorize, loadBoard } from "./access.ts";
+import { authorize, loadBoard, requireUser } from "./access.ts";
 import { mutate } from "./events.ts";
 
 export const DEFAULT_COLUMNS = ["Backlog", "Ready for Dev", "In Progress", "Review", "Done"] as const;
@@ -87,8 +87,11 @@ export async function updateBoard(p: Principal, boardId: string, patch: { name?:
 }
 
 /** Deletes the board with all its columns, tasks and comments. Emits a single `board.deleted`. */
+/** Deleting a board (with all its columns, tasks and comments) requires the admin role; agents cannot. */
 export async function deleteBoard(p: Principal, boardId: string): Promise<void> {
   const board = await loadBoard(p, boardId);
+  requireUser(p);
+  await authorize(p, board.workspaceId, "admin");
   await mutate(board.workspaceId, actorOf(p), async (tx, emit) => {
     const deleted = await tx.delete(boards).where(eq(boards.id, boardId)).returning({ id: boards.id });
     if (deleted.length === 0) throw notFound("Board");

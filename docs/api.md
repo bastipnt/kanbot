@@ -56,7 +56,7 @@ Access token: JWT, 15 min. Refresh token: opaque, 30 days, rotated on use.
 | POST | /workspaces/:id/boards | {name} | Board (seeds columns: Backlog, Ready for Dev, In Progress, Review, Done) |
 | GET | /boards/:id | – | {board, columns: Column[], tasks: Task[]} |
 | PATCH | /boards/:id | {name} | Board |
-| DELETE | /boards/:id | – | 204 |
+| DELETE | /boards/:id | – | 204 (admin+) |
 | POST | /boards/:id/columns | {name, afterId?, wipLimit?} | Column |
 | PATCH | /columns/:id | {name?, wipLimit?, beforeId?, afterId?} | Column |
 | DELETE | /columns/:id | – | 204 (409 if not empty) |
@@ -112,10 +112,13 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   `column.created` per seeded column. `comment.created` payload is a `Comment`.
 - **Invites**: `role` is `admin` or `member` (default `member`). Tokens are single use and expire after 7 days;
   accepting while already a member returns the workspace without consuming the invite. `url` = `PUBLIC_URL/invites/<token>`.
+- **Deleting**: deleting a board (with all its columns, tasks and comments) requires the `admin` role (or owner).
+  Members may delete columns and tasks. Agents (API keys) cannot delete boards, columns or tasks → `403 forbidden`.
 - **Members**: admins may remove members; only the owner may remove admins; the owner cannot be removed.
   Any non-owner may remove themselves (leave). Removed users' WebSockets are closed with code `4403`.
 - **API keys**: act with `member` rights in their workspace only — admin-only endpoints (invites, api-keys,
-  member removal), `POST /workspaces` and `/me` return `403` for agents. `GET /workspaces` returns just the key's
+  member removal, board delete), `DELETE /columns/:id`, `DELETE /tasks/:id`, `POST /workspaces` and `/me` return
+  `403` for agents. `GET /workspaces` returns just the key's
   workspace (role `member`). `secret` = `kb_` + 43 base64url chars; `prefix` = its first 8 characters.
 - **WebSocket**: `token` may also be an API key. Failed auth → HTTP `401`/`403` with the error JSON instead of an upgrade.
   Events committed while `hello` is being prepared are delivered after it (only those with `seq > latestSeq`).

@@ -6,7 +6,7 @@ import { ApiError, badRequest, conflict, notFound } from "../lib/errors.ts";
 import { computePosition, initialPositions, type Placement } from "../lib/position.ts";
 import { actorOf, type Principal } from "../lib/principal.ts";
 import { toColumn, type Column } from "../lib/serialize.ts";
-import { loadBoard, loadColumn } from "./access.ts";
+import { loadBoard, loadColumn, requireUser } from "./access.ts";
 import { lockedBoard } from "./boards.ts";
 import { mutate } from "./events.ts";
 
@@ -87,6 +87,7 @@ export async function updateColumn(
 /** Deletes an empty column; 409 conflict if it still contains tasks. */
 export async function deleteColumn(p: Principal, columnId: string): Promise<void> {
   const { workspaceId } = await loadColumn(p, columnId);
+  requireUser(p);
   await mutate(workspaceId, actorOf(p), async (tx, emit) => {
     await currentColumn(tx, columnId);
     const [{ n } = { n: 0 }] = await tx.select({ n: count() }).from(tasks).where(eq(tasks.columnId, columnId));

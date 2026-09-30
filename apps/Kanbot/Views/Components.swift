@@ -1,5 +1,6 @@
 import KanbotKit
 import SwiftUI
+import UniformTypeIdentifiers
 #if os(macOS)
 import AppKit
 #else
@@ -154,5 +155,35 @@ extension View {
     func namePrompt(_ title: String, isPresented: Binding<Bool>, initial: String = "", placeholder: String = "Name",
                     onSubmit: @escaping (String) -> Void) -> some View {
         modifier(NamePrompt(title: title, isPresented: isPresented, initial: initial, placeholder: placeholder, onSubmit: onSubmit))
+    }
+}
+
+/// A board export (`BoardExport` JSON) handed to `.fileExporter`.
+struct BoardFile: FileDocument {
+    static let readableContentTypes: [UTType] = [.json]
+    var data: Data
+
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
+extension View {
+    /// Picks a board export file and imports it as a new board in the store's workspace.
+    func boardImporter(isPresented: Binding<Bool>, store: WorkspaceStore) -> some View {
+        fileImporter(isPresented: isPresented, allowedContentTypes: [.json]) { result in
+            do {
+                let url = try result.get()
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                let data = try Data(contentsOf: url)
+                Task { await store.importBoard(file: data) }
+            } catch {
+                store.lastError = error.localizedDescription
+            }
+        }
     }
 }

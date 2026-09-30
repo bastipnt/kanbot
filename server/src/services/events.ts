@@ -31,6 +31,13 @@ export interface EventDraft {
 
 export type Emit = (draft: EventDraft) => void;
 
+/** Rows per multi-row INSERT, keeping well under Postgres' 65 535 bind-parameter limit. */
+export const INSERT_CHUNK = 1000;
+
+export function* chunks<T>(items: T[], size: number): Generator<T[]> {
+  for (let i = 0; i < items.length; i += size) yield items.slice(i, i + size);
+}
+
 /**
  * Run a workspace mutation. Inside one transaction:
  *  1. lock the workspace row (`SELECT ... FOR UPDATE`) — this serialises all mutations of a workspace,
@@ -44,7 +51,7 @@ export async function mutate<T>(
   actor: Actor,
   fn: (tx: Tx, emit: Emit) => Promise<T>,
 ): Promise<T> {
-  let written: EventRow[] = [];
+  const written: EventRow[] = [];
   const result = await db.transaction(async (tx) => {
     const [ws] = await tx
       .select({ seq: workspaces.eventSeq })
@@ -58,21 +65,19 @@ export async function mutate<T>(
 
     if (drafts.length > 0) {
       let seq = ws.seq;
-      written = await tx
-        .insert(events)
-        .values(
-          drafts.map((d) => ({
-            workspaceId,
-            seq: ++seq,
-            actorType: actor.type,
-            actorId: actor.id,
-            actorName: actor.name,
-            type: d.type,
-            entityId: d.entityId,
-            payload: d.payload ?? {},
-          })),
-        )
-        .returning();
+      const rows = drafts.map((d) => ({
+        workspaceId,
+        seq: ++seq,
+        actorType: actor.type,
+        actorId: actor.id,
+        actorName: actor.name,
+        type: d.type,
+        entityId: d.entityId,
+        payload: d.payload ?? {},
+      }));
+      for (const chunk of chunks(rows, INSERT_CHUNK)) {
+        written.push(...(await tx.insert(events).values(chunk).returning()));
+      }
       await tx.update(workspaces).set({ eventSeq: seq }).where(eq(workspaces.id, workspaceId));
     }
     return value;

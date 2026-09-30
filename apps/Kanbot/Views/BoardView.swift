@@ -1,5 +1,6 @@
 import KanbotKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Drag payload for a task card. Plain string so it works with any drop target on both platforms.
 enum TaskDrag {
@@ -17,6 +18,7 @@ struct BoardView: View {
     @State private var showNewColumn = false
     @State private var showRename = false
     @State private var confirmDelete = false
+    @State private var exportFile: BoardFile?
 
     var body: some View {
         ScrollView(.horizontal) {
@@ -46,6 +48,7 @@ struct BoardView: View {
             ToolbarItem {
                 Menu {
                     Button("Rename board…") { showRename = true }
+                    Button("Export board…") { export() }
                     if store.myRole.canAdminister {
                         Button("Delete board…", role: .destructive) { confirmDelete = true }
                     }
@@ -65,12 +68,27 @@ struct BoardView: View {
         .namePrompt("Rename board", isPresented: $showRename, initial: store.openBoard?.name ?? "") { name in
             if let id = store.openBoard?.id { Task { await store.renameBoard(id, name: name) } }
         }
+        .fileExporter(
+            isPresented: Binding(get: { exportFile != nil }, set: { if !$0 { exportFile = nil } }),
+            document: exportFile,
+            contentType: .json,
+            defaultFilename: store.openBoard?.name ?? "Board"
+        ) { result in
+            if case .failure(let error) = result { store.lastError = error.localizedDescription }
+        }
         .confirmationDialog("Delete \(store.openBoard?.name ?? "board")?", isPresented: $confirmDelete) {
             Button("Delete board and all its tasks", role: .destructive) {
                 if let id = store.openBoard?.id { Task { await store.deleteBoard(id) } }
             }
         } message: {
             Text("This can't be undone.")
+        }
+    }
+
+    private func export() {
+        guard let id = store.openBoard?.id else { return }
+        Task {
+            if let data = await store.exportBoard(id) { exportFile = BoardFile(data: data) }
         }
     }
 }

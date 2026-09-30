@@ -20,7 +20,7 @@ export interface TaskFields {
   dueAt?: string | null;
 }
 
-const cleanLabels = (labels: string[]) => [...new Set(labels.map((l) => l.trim()).filter(Boolean))];
+export const cleanLabels = (labels: string[]) => [...new Set(labels.map((l) => l.trim()).filter(Boolean))];
 
 async function assertAssignable(ex: Executor, workspaceId: string, userId: string | null | undefined) {
   if (!userId) return;

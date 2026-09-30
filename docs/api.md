@@ -91,3 +91,34 @@ An API key acts as `Actor{type:"agent", name: apiKey.name}` in its workspace onl
 `list_boards`, `get_board`, `search_tasks`, `get_task`, `create_task`, `update_task`,
 `move_task` (`column` = id or case-insensitive name, e.g. "Ready for Dev"), `assign_task`
 (by member email or name), `add_comment`, `create_column`, `reorder_columns`, `list_members`.
+
+## Clarifications (server v1)
+Non-breaking notes on behaviour the tables above leave open. Nothing here changes an existing shape.
+- **Status codes**: successful requests return `200` with the documented body (including creates); deletes return `204`.
+  A resource that exists but is outside your workspaces → `403 forbidden`; unknown/malformed id → `404 not_found`.
+  Unexpected server errors → `500` with code `internal`.
+- **Placement** (`beforeId`/`afterId`, tasks and columns): `afterId` = place immediately after that sibling,
+  `beforeId` = immediately before it; both = between them (`afterId` must precede `beforeId`). Ids must be siblings in the
+  target list (target column for tasks, same board for columns), else `400`. With neither, a task move / new column
+  goes to the end; `PATCH /columns/:id` without them keeps the current position.
+- **Column references**: `columnId` in `POST /boards/:id/tasks` and `POST /tasks/:id/move` also accepts a
+  case-insensitive column name (same resolution as MCP `move_task`). Moving to a column of another board → `404`.
+- **Search**: `GET /workspaces/:id/tasks/search?q=&boardId=&limit=` — `boardId` and `limit` (default 100, max 500) are
+  optional. Matches title/description (case-insensitive substring) or an exact label; most recently updated first.
+- **Events**: `limit` defaults to 500 (max 1000). If a page has `limit` events, page again with `since` = last seq.
+  Creating a workspace records `member.added` for the owner (seq 1). `member.added` payload is a `Member`;
+  `member.removed` payload is `{id: userId}`; for member events `entityId` = userId. Deleting a board emits only
+  `board.deleted` (its columns/tasks/comments go with it). Creating a board emits `board.created` followed by one
+  `column.created` per seeded column. `comment.created` payload is a `Comment`.
+- **Invites**: `role` is `admin` or `member` (default `member`). Tokens are single use and expire after 7 days;
+  accepting while already a member returns the workspace without consuming the invite. `url` = `PUBLIC_URL/invites/<token>`.
+- **Members**: admins may remove members; only the owner may remove admins; the owner cannot be removed.
+  Any non-owner may remove themselves (leave). Removed users' WebSockets are closed with code `4403`.
+- **API keys**: act with `member` rights in their workspace only — admin-only endpoints (invites, api-keys,
+  member removal), `POST /workspaces` and `/me` return `403` for agents. `GET /workspaces` returns just the key's
+  workspace (role `member`). `secret` = `kb_` + 43 base64url chars; `prefix` = its first 8 characters.
+- **WebSocket**: `token` may also be an API key. Failed auth → HTTP `401`/`403` with the error JSON instead of an upgrade.
+  Events committed while `hello` is being prepared are delivered after it (only those with `seq > latestSeq`).
+- **MCP tools** accept a board id or case-insensitive board name (`board`, optional when the workspace has one board).
+  `reorder_columns` takes the complete ordered list of column ids/names. Tool errors are returned as `isError` results
+  whose text is the error JSON above.

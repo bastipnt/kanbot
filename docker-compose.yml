@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: kanbot
       POSTGRES_DB: kanbot
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://kanbot:kanbot@db:5432/kanbot
-      JWT_SECRET: ${JWT_SECRET:-dev-insecure-jwt-secret-change-me}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (e.g. openssl rand -base64 48)}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8787}
       PORT: "8787"
     ports:

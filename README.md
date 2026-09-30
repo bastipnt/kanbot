@@ -8,6 +8,16 @@ Kanban boards for humans and AI agents. Native macOS + iOS apps (SwiftUI), a sel
 
 ## Server quickstart
 
+`docker-compose.yml` requires `JWT_SECRET` (there is no default). Put a random one in a git-ignored `.env` next to
+it once — Compose reads that file automatically, also for `docker compose up -d db`:
+
+```sh
+echo "JWT_SECRET=$(openssl rand -base64 48)" >> .env
+```
+
+(or pass it per command: `JWT_SECRET=$(openssl rand -base64 48) docker compose up -d --build`). In production the
+server refuses secrets shorter than 32 characters or containing `insecure`/`change-me`.
+
 Everything in Docker:
 
 ```sh
@@ -18,7 +28,7 @@ curl localhost:8787/health
 Local development (Bun ≥ 1.2):
 
 ```sh
-docker compose up -d db           # Postgres on localhost:5432 (set DB_PORT=5433 to use another host port)
+docker compose up -d db           # Postgres on 127.0.0.1:5432 (set DB_PORT=5433 to use another host port)
 cd server
 cp .env.example .env              # DATABASE_URL, JWT_SECRET, PUBLIC_URL
 bun install

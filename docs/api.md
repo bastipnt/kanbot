@@ -120,7 +120,7 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   member removal, board delete), `DELETE /columns/:id`, `DELETE /tasks/:id`, `POST /workspaces` and `/me` return
   `403` for agents. `GET /workspaces` returns just the key's
   workspace (role `member`). `secret` = `kb_` + 43 base64url chars; `prefix` = its first 8 characters.
-- **WebSocket**: `token` may also be an API key. Failed auth → HTTP `401`/`403` with the error JSON instead of an upgrade.
+- **WebSocket**: `token` may also be an API key; deleting the key closes its sockets with code `4403`. Failed auth → HTTP `401`/`403` with the error JSON instead of an upgrade.
   Events committed while `hello` is being prepared are delivered after it (only those with `seq > latestSeq`).
 - **MCP tools** accept a board id or case-insensitive board name (`board`, optional when the workspace has one board).
   `reorder_columns` takes the complete ordered list of column ids/names. Tool errors are returned as `isError` results

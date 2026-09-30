@@ -5,6 +5,7 @@ import { isUuid, randomToken, sha256 } from "../lib/crypto.ts";
 import { forbidden, notFound } from "../lib/errors.ts";
 import type { Principal } from "../lib/principal.ts";
 import { toApiKey, type ApiKey } from "../lib/serialize.ts";
+import { hub } from "../realtime/hub.ts";
 import { authorize } from "./access.ts";
 
 export const API_KEY_PREFIX_LENGTH = 8;
@@ -43,4 +44,5 @@ export async function deleteApiKey(p: Principal, apiKeyId: string): Promise<void
   if (!key) throw notFound("API key");
   await authorize(p, key.workspaceId, "admin");
   await db.delete(apiKeys).where(eq(apiKeys.id, apiKeyId));
+  hub.kickApiKey(key.workspaceId, apiKeyId);
 }

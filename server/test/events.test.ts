@@ -94,4 +94,36 @@ describe("events & realtime", () => {
     expect(res2.status).toBe(403);
     expect(((await res2.json()) as any).error.code).toBe("forbidden");
   });
+  test("deleting an API key closes its WebSockets with 4403", async () => {
+    const { user, ws, board, col } = await setup();
+    const mk = async (name: string) =>
+      (await api("POST", `/workspaces/${ws.id}/api-keys`, { token: user.token, body: { name } })).body;
+    const revoked = await mk("Revoked");
+    const kept = await mk("Kept");
+
+    const closed = (s: ReturnType<typeof connectWs>) =>
+      new Promise<{ code: number; reason: string }>((resolve) => {
+        s.ws.onclose = (e) => resolve({ code: e.code, reason: e.reason });
+      });
+    const agent = connectWs(revoked.secret, ws.id);
+    const other = connectWs(kept.secret, ws.id);
+    const human = connectWs(user.token, ws.id);
+    for (const s of [agent, other, human]) {
+      await s.opened;
+      await s.next((m) => m.kind === "hello");
+    }
+    const agentClosed = closed(agent);
+
+    expect((await api("DELETE", `/api-keys/${revoked.apiKey.id}`, { token: user.token })).status).toBe(204);
+    expect(await agentClosed).toEqual({ code: 4403, reason: "API key revoked" });
+
+    // Other connections in the workspace keep receiving events.
+    const task = await createTask(user, board.id, col("Backlog").id, "still live");
+    for (const s of [other, human]) {
+      const msg = await s.next((m) => m.kind === "event" && m.event.type === "task.created");
+      expect(msg.event.entityId).toBe(task.id);
+      expect(s.ws.readyState).toBe(WebSocket.OPEN);
+      s.ws.close();
+    }
+  });
 });

@@ -15,6 +15,7 @@ import { hub } from "./hub.ts";
 export interface WsData {
   workspaceId: string;
   userId?: string;
+  apiKeyId?: string;
   unsubscribe?: () => void;
   /** Events received before `hello` was sent; flushed right after it. */
   pending: Event[] | null;
@@ -35,6 +36,7 @@ export async function upgradeWebSocket(req: Request, server: Server<WsData>): Pr
     const data: WsData = {
       workspaceId,
       userId: principal.kind === "user" ? principal.user.id : undefined,
+      apiKeyId: principal.kind === "agent" ? principal.apiKey.id : undefined,
       pending: [],
     };
     if (server.upgrade(req, { data })) return undefined;
@@ -51,12 +53,13 @@ export const websocketHandler: WebSocketHandler<WsData> = {
     // arrive before `hello` are buffered and only those newer than latestSeq are forwarded.
     ws.data.unsubscribe = hub.subscribe(ws.data.workspaceId, {
       userId: ws.data.userId,
+      apiKeyId: ws.data.apiKeyId,
       onEvent(event) {
         if (ws.data.pending) ws.data.pending.push(event);
         else send(ws, { kind: "event", event });
       },
       onKick() {
-        ws.close(4403, "removed from workspace");
+        ws.close(4403, ws.data.apiKeyId ? "API key revoked" : "removed from workspace");
       },
     });
     try {

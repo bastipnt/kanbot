@@ -27,6 +27,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (e.g. openssl rand -base64 48)}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8787}
       PORT: "8787"
+      REGISTRATION_DISABLED: ${REGISTRATION_DISABLED:-false}
     ports:
       - "8787:8787"
 

@@ -55,6 +55,50 @@ curl -s localhost:8787/workspaces/$WS/api-keys -H "authorization: Bearer $TOKEN"
   -d '{"name":"Claude"}' | jq -r .secret
 ```
 
+## Deploy (Docker host with caddy-docker-proxy)
+
+Pushes to `main` that touch the server run `.github/workflows/deploy.yml`: server tests → build
+`ghcr.io/<owner>/kanbot-server:<sha>` → SSH to the host → `infra/deploy/remote-deploy.sh`, which backs up Postgres,
+runs `docker compose -f docker-compose.prod.yml up --wait` and rolls back to the previous image if the server doesn't
+become healthy. Migrations run when the server starts. It can also be started manually (*Run workflow*).
+
+The host needs Docker, a caddy-docker-proxy on the external `caddy_network`, and a DNS record for the hostname. One-time
+setup on the host:
+
+```sh
+mkdir -p ~/kanbot && cd ~/kanbot
+# copy .env.production.example from this repo to .env.production and fill it in
+chmod 600 .env.production
+```
+
+GitHub → Settings → Environments → `production`, secrets:
+
+| Secret | Value |
+|---|---|
+| `DEPLOY_HOST` | server hostname or IP |
+| `DEPLOY_PORT` | SSH port (optional, default 22) |
+| `DEPLOY_USER` | SSH user, must be allowed to run `docker` |
+| `DEPLOY_SSH_KEY` | private key of a deploy-only key pair (public key in the user's `authorized_keys`) |
+| `DEPLOY_KNOWN_HOSTS` | output of `ssh-keyscan -p <port> <host>` |
+| `DEPLOY_PATH` | directory holding `.env.production`, e.g. `/home/deploy/kanbot` |
+
+### Invite users
+
+Production defaults to `REGISTRATION_DISABLED=true`: only people with a signup invite can create an account. On the
+host, create one (single use, 7 days by default; `--email` restricts it to that address):
+
+```sh
+cd ~/kanbot
+docker compose -f docker-compose.prod.yml --env-file .env.production exec server \
+  bun run invite:create --email friend@example.com
+```
+
+They enter the printed code as *Invite code* when creating their account in the app, then join a workspace with a
+normal workspace invite link. Locally: `cd server && bun run invite:create`.
+
+If the `kanbot-server` package on GHCR is private, run `docker login ghcr.io` on the host once with a token that can
+read packages, or make the package public. Backups of the last 10 deploys are kept in `$DEPLOY_PATH/backups/`.
+
 ## Connect Claude Code (MCP)
 
 Kanbot exposes an MCP server at `POST /mcp` (Streamable HTTP). Authenticate with an agent API key of the workspace

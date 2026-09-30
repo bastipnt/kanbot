@@ -1,10 +1,10 @@
-import { and, eq, gt, lt, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import { sign, verify } from "hono/jwt";
 import { db } from "../db/index.ts";
-import { apiKeys, refreshTokens, users, type UserRow } from "../db/schema.ts";
+import { apiKeys, refreshTokens, signupInvites, users, type UserRow } from "../db/schema.ts";
 import { env } from "../env.ts";
 import { randomToken, sha256 } from "../lib/crypto.ts";
-import { conflict, unauthorized } from "../lib/errors.ts";
+import { conflict, forbidden, unauthorized } from "../lib/errors.ts";
 import type { Principal } from "../lib/principal.ts";
 import { toUser, type User } from "../lib/serialize.ts";
 
@@ -38,15 +38,61 @@ async function issueTokens(userId: string): Promise<Tokens> {
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
-export async function register(input: { email: string; password: string; name: string }): Promise<{ user: User } & Tokens> {
+export const SIGNUP_INVITE_TTL_DAYS = 7;
+
+/** Create a single-use signup invite (CLI only). With `email`, only that address may register with it. */
+export async function createSignupInvite(
+  input: { email?: string; days?: number } = {},
+): Promise<{ token: string; email: string | null; expiresAt: Date }> {
+  const token = randomToken(32);
+  const email = input.email ? normalizeEmail(input.email) : null;
+  const expiresAt = new Date(Date.now() + (input.days ?? SIGNUP_INVITE_TTL_DAYS) * 24 * 60 * 60 * 1000);
+  await db.insert(signupInvites).values({ tokenHash: sha256(token), email, expiresAt });
+  return { token, email, expiresAt };
+}
+
+/**
+ * Create an account. While registration is disabled a valid, unused signup invite is required; it is consumed
+ * in the same transaction as the user insert, so a failed registration (e.g. duplicate email) keeps it usable.
+ */
+export async function register(input: {
+  email: string;
+  password: string;
+  name: string;
+  inviteToken?: string;
+}): Promise<{ user: User } & Tokens> {
   const email = normalizeEmail(input.email);
+  if (env.registrationDisabled && !input.inviteToken) {
+    throw forbidden("Registration is disabled; an invite is required");
+  }
   const passwordHash = await Bun.password.hash(input.password, { algorithm: "argon2id" });
-  const [user] = await db
-    .insert(users)
-    .values({ email, name: input.name.trim(), passwordHash })
-    .onConflictDoNothing()
-    .returning();
-  if (!user) throw conflict("An account with this email already exists");
+  const user = await db.transaction(async (tx) => {
+    let inviteId: string | undefined;
+    if (env.registrationDisabled && input.inviteToken) {
+      const [invite] = await tx
+        .update(signupInvites)
+        .set({ usedAt: new Date() })
+        .where(
+          and(
+            eq(signupInvites.tokenHash, sha256(input.inviteToken)),
+            isNull(signupInvites.usedAt),
+            gt(signupInvites.expiresAt, new Date()),
+            or(isNull(signupInvites.email), eq(signupInvites.email, email)),
+          ),
+        )
+        .returning({ id: signupInvites.id });
+      if (!invite) throw forbidden("Invalid or expired invite");
+      inviteId = invite.id;
+    }
+    const [row] = await tx
+      .insert(users)
+      .values({ email, name: input.name.trim(), passwordHash })
+      .onConflictDoNothing()
+      .returning();
+    if (!row) throw conflict("An account with this email already exists");
+    if (inviteId) await tx.update(signupInvites).set({ usedBy: row.id }).where(eq(signupInvites.id, inviteId));
+    return row;
+  });
   return { user: toUser(user), ...(await issueTokens(user.id)) };
 }
 

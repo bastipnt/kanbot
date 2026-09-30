@@ -8,6 +8,7 @@
     "start": "bun src/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
+    "invite:create": "bun src/cli/invite.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

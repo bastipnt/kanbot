@@ -32,7 +32,7 @@ Event types: `board.created|updated|deleted`, `column.created|updated|deleted`,
 ## Auth
 | Method | Path | Body | Response |
 |---|---|---|---|
-| POST | /auth/register | {email,password,name} | {user, accessToken, refreshToken} |
+| POST | /auth/register | {email,password,name,inviteToken?} | {user, accessToken, refreshToken} |
 | POST | /auth/login | {email,password} | {user, accessToken, refreshToken} |
 | POST | /auth/refresh | {refreshToken} | {accessToken, refreshToken} |
 | GET | /me | – | User |
@@ -110,6 +110,11 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   `member.removed` payload is `{id: userId}`; for member events `entityId` = userId. Deleting a board emits only
   `board.deleted` (its columns/tasks/comments go with it). Creating a board emits `board.created` followed by one
   `column.created` per seeded column. `comment.created` payload is a `Comment`.
+- **Registration**: a server started with `REGISTRATION_DISABLED=true` only lets people register with a signup invite
+  (`inviteToken`), created by the operator with `bun run invite:create [--email <address>] [--days <n>]` (default 7 days).
+  Signup invites are single use, may be bound to one email (case-insensitive), and are only consumed by a successful
+  registration. Without a valid invite → `403 forbidden`. With registration open, `inviteToken` is ignored.
+  Signup invites are separate from workspace invites below.
 - **Invites**: `role` is `admin` or `member` (default `member`). Tokens are single use and expire after 7 days;
   accepting while already a member returns the workspace without consuming the invite. `url` = `PUBLIC_URL/invites/<token>`.
 - **Deleting**: deleting a board (with all its columns, tasks and comments) requires the `admin` role (or owner).

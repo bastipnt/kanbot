@@ -1,0 +1,34 @@
+name: kanbot
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: kanbot
+      POSTGRES_PASSWORD: kanbot
+      POSTGRES_DB: kanbot
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kanbot -d kanbot"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  server:
+    build: ./server
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://kanbot:kanbot@db:5432/kanbot
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (e.g. openssl rand -base64 48)}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8787}
+      PORT: "8787"
+    ports:
+      - "8787:8787"
+
+volumes:
+  pgdata:

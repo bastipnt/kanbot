@@ -1,0 +1,11 @@
+{
+  "name": "kanbot-server",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/shyim/devcontainers-features/bun:0": {}
+  },
+  "forwardPorts": [8787, 5432],
+  "postCreateCommand": "cd server && bun install || true"
+}

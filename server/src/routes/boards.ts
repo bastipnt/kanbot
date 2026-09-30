@@ -3,11 +3,16 @@ import { z } from "zod";
 import { principal, validate, type AppEnv } from "../lib/http.ts";
 import * as s from "../lib/schemas.ts";
 import * as boards from "../services/boards.ts";
+import * as transfer from "../services/boardTransfer.ts";
 import * as columns from "../services/columns.ts";
 import * as tasks from "../services/tasks.ts";
 
 const placement = { beforeId: s.uuid.nullish(), afterId: s.uuid.nullish() };
 const nn = <T>(v: T | null | undefined) => v ?? undefined;
+
+/** `Content-Disposition` with an ASCII fallback and the exact UTF-8 name (RFC 6266). */
+const attachment = (filename: string) =>
+  `attachment; filename="${filename.replace(/[^\x20-\x7e]|["\\/]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`)}`;
 
 export const boardRoutes = new Hono<AppEnv>()
 
@@ -24,6 +29,14 @@ export const boardRoutes = new Hono<AppEnv>()
     await boards.deleteBoard(principal(c), c.req.param("id"));
     return c.body(null, 204);
   })
+  .get("/boards/:id/export", async (c) => {
+    const file = await transfer.exportBoard(principal(c), c.req.param("id"));
+    c.header("Content-Disposition", attachment(`${file.board.name}.json`));
+    return c.json(file);
+  })
+  .post("/workspaces/:id/boards/import", validate("json", s.boardExport), async (c) =>
+    c.json(await transfer.importBoard(principal(c), c.req.param("id"), c.req.valid("json"))),
+  )
 
   // Columns
   .post(

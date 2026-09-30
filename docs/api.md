@@ -23,6 +23,11 @@ Task          { id, boardId, columnId, title, description /* markdown */, positi
 Comment       { id, taskId, body, actor: Actor, createdAt }
 Actor         { type: "user"|"agent", id, name }
 ApiKey        { id, workspaceId, name, prefix /* first 8 chars */, createdAt, lastUsedAt }
+BoardExport   { format: "kanbot.board", version: 1, exportedAt, board: { name },
+                columns: [{ name, wipLimit, tasks: [{ title, description, labels, dueAt,
+                  assignee: { name, email } | null, createdBy: Actor, createdAt,
+                  comments: [{ body, actor: Actor, createdAt }] }] }] }
+                /* no ids or positions: array order is the order on the board */
 Event         { seq /* int, per workspace, strictly increasing */, workspaceId, actor: Actor,
                 type, entityId, payload /* full entity after change, or {id} on delete */, createdAt }
 ```
@@ -57,6 +62,8 @@ Access token: JWT, 15 min. Refresh token: opaque, 30 days, rotated on use.
 | GET | /boards/:id | – | {board, columns: Column[], tasks: Task[]} |
 | PATCH | /boards/:id | {name} | Board |
 | DELETE | /boards/:id | – | 204 (admin+) |
+| GET | /boards/:id/export | – | BoardExport (`Content-Disposition: attachment`) |
+| POST | /workspaces/:id/boards/import | BoardExport | Board (always a new board) |
 | POST | /boards/:id/columns | {name, afterId?, wipLimit?} | Column |
 | PATCH | /columns/:id | {name?, wipLimit?, beforeId?, afterId?} | Column |
 | DELETE | /columns/:id | – | 204 (409 if not empty) |
@@ -90,7 +97,8 @@ An API key acts as `Actor{type:"agent", name: apiKey.name}` in its workspace onl
 `POST /mcp` Streamable HTTP, auth with agent API key. Tools (thin wrappers over same services):
 `list_boards`, `get_board`, `search_tasks`, `get_task`, `create_task`, `update_task`,
 `move_task` (`column` = id or case-insensitive name, e.g. "Ready for Dev"), `assign_task`
-(by member email or name), `add_comment`, `create_column`, `reorder_columns`, `list_members`.
+(by member email or name), `add_comment`, `create_column`, `reorder_columns`, `list_members`,
+`export_board`, `import_board`.
 
 ## Clarifications (server v1)
 Non-breaking notes on behaviour the tables above leave open. Nothing here changes an existing shape.
@@ -130,3 +138,12 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
 - **MCP tools** accept a board id or case-insensitive board name (`board`, optional when the workspace has one board).
   `reorder_columns` takes the complete ordered list of column ids/names. Tool errors are returned as `isError` results
   whose text is the error JSON above.
+- **Board export/import**: any member (and API keys) may export and import. Import creates a new board in the target
+  workspace (the file's `board.name` is used; names need not be unique) with fresh ids and positions; it never
+  touches existing boards. Assignees are matched to workspace members by email (case-insensitive), otherwise
+  cleared. `createdAt` of tasks and comments is kept; tasks and comments are attributed to the importing actor
+  (attribution in a file can't be verified), and a comment whose original author name differs from the importer's
+  gets its body prefixed with `*Originally by <name>*` + blank line. Events: `board.created`, then `column.created`,
+  `task.created` and `comment.created` for every imported entity, all in one transaction. Limits: 200 columns,
+  10 000 tasks, 1 000 comments per task; field limits as for the regular endpoints. Unknown `format` or a
+  `version` other than 1 → `400`.

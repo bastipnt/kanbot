@@ -139,6 +139,14 @@ public actor APIClient {
         try await send("PATCH", "/boards/\(id.api)", body: ["name": .string(name)])
     }
     public func deleteBoard(id: UUID) async throws { try await sendEmpty("DELETE", "/boards/\(id.api)") }
+    /// The board as a portable `BoardExport` JSON file (docs/api.md), returned verbatim for saving to disk.
+    public func exportBoard(id: UUID) async throws -> Data {
+        try await raw("GET", "/boards/\(id.api)/export", query: [], body: nil, authenticated: true)
+    }
+    /// Creates a new board from a `BoardExport` file; the server validates its contents.
+    public func importBoard(workspaceId: UUID, file: Data) async throws -> Board {
+        try await send("POST", "/workspaces/\(workspaceId.api)/boards/import", rawBody: file)
+    }
 
     public func createColumn(boardId: UUID, name: String, afterId: UUID? = nil, wipLimit: Int? = nil) async throws -> Column {
         var body: [String: JSONValue] = ["name": .string(name)]
@@ -214,7 +222,13 @@ public actor APIClient {
 
     private func send<T: Decodable>(_ method: String, _ path: String, query: [URLQueryItem] = [],
                                     body: JSONValue? = nil, authenticated: Bool = true) async throws -> T {
-        let data = try await raw(method, path, query: query, body: body, authenticated: authenticated)
+        try await send(method, path, query: query, rawBody: body.map { try KanbotJSON.encoder.encode($0) },
+                       authenticated: authenticated)
+    }
+
+    private func send<T: Decodable>(_ method: String, _ path: String, query: [URLQueryItem] = [],
+                                    rawBody: Data?, authenticated: Bool = true) async throws -> T {
+        let data = try await raw(method, path, query: query, body: rawBody, authenticated: authenticated)
         do {
             return try KanbotJSON.decoder.decode(T.self, from: data)
         } catch {
@@ -222,7 +236,7 @@ public actor APIClient {
         }
     }
 
-    private func raw(_ method: String, _ path: String, query: [URLQueryItem], body: JSONValue?,
+    private func raw(_ method: String, _ path: String, query: [URLQueryItem], body: Data?,
                      authenticated: Bool, isRetry: Bool = false) async throws -> Data {
         var components = URLComponents(url: serverURL.appending(path: path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
@@ -231,7 +245,7 @@ public actor APIClient {
         request.timeoutInterval = 20
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try KanbotJSON.encoder.encode(body)
+            request.httpBody = body
         }
         if authenticated {
             request.setValue("Bearer \(try await validAccessToken())", forHTTPHeaderField: "Authorization")

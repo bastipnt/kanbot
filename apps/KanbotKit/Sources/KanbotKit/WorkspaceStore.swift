@@ -265,6 +265,22 @@ public final class WorkspaceStore {
         } catch { report(error) }
     }
 
+    /// The board as a `BoardExport` JSON file, or nil (with `lastError` set) on failure.
+    public func exportBoard(_ id: UUID) async -> Data? {
+        do { return try await api.exportBoard(id: id) } catch { report(error); return nil }
+    }
+
+    /// Imports a `BoardExport` file as a new board and opens it.
+    @discardableResult
+    public func importBoard(file: Data) async -> Board? {
+        do {
+            let board = try await api.importBoard(workspaceId: workspace.id, file: file)
+            upsert(&boards, board)
+            try await loadBoard(board.id)
+            return board
+        } catch { report(error); return nil }
+    }
+
     public func addColumn(name: String) async {
         guard let board = openBoard else { return }
         do {

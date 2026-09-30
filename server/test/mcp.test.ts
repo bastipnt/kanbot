@@ -60,6 +60,8 @@ describe("mcp", () => {
         "create_column",
         "reorder_columns",
         "list_members",
+        "export_board",
+        "import_board",
       ].sort(),
     );
     for (const t of tools) expect(t.description?.length).toBeGreaterThan(10);
@@ -160,6 +162,28 @@ describe("mcp", () => {
     const res = await call(client, "move_task", { taskId: foreign.id, column: "Done" });
     expect(res.isError).toBe(true);
     expect(res.data.error.code).toBe("forbidden");
+    await client.close();
+  });
+
+  test("export_board and import_board copy a board", async () => {
+    const { user, board, col, secret } = await agentSetup();
+    await createTask(user, board.id, col("Review").id, "Check copy");
+    const client = await mcpClient(secret);
+
+    const exported = await call(client, "export_board", { board: "Board" });
+    expect(exported.data).toMatchObject({ format: "kanbot.board", version: 1, board: { name: "Board" } });
+
+    const imported = await call(client, "import_board", { ...exported.data, board: { name: "Copy" } });
+    expect(imported.isError).toBe(false);
+    expect(imported.data.name).toBe("Copy");
+    const snap = (await api("GET", `/boards/${imported.data.id}`, { token: user.token })).body;
+    const review = snap.columns.find((c: any) => c.name === "Review");
+    expect(snap.tasks).toEqual([expect.objectContaining({ title: "Check copy", columnId: review.id })]);
+    expect(snap.tasks[0].createdBy).toMatchObject({ type: "agent", name: "Claude" });
+
+    // Rejected by the tool's input schema (SDK validation error, not the contract error JSON).
+    const bad = await client.callTool({ name: "import_board", arguments: { ...exported.data, version: 2 } });
+    expect(bad.isError).toBe(true);
     await client.close();
   });
 });

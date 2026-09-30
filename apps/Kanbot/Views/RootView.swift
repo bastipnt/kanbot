@@ -76,6 +76,7 @@ struct WorkspaceView: View {
     @Bindable var store: WorkspaceStore
     @State private var selectedBoardId: UUID?
     @State private var showNewBoard = false
+    @State private var showImport = false
     @State private var showNewWorkspace = false
     @State private var showJoin = false
     @State private var showSettings = false
@@ -100,6 +101,10 @@ struct WorkspaceView: View {
                 HStack {
                     ConnectionIndicator(state: store.connection)
                     Spacer()
+                    Button { showImport = true } label: { Label("Import board", systemImage: "square.and.arrow.down") }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .help("Import a board from an exported file")
                     Button { showNewBoard = true } label: { Label("New board", systemImage: "plus") }
                         .buttonStyle(.borderless)
                 }
@@ -120,6 +125,7 @@ struct WorkspaceView: View {
                     Text("Create a board to start organizing tasks.")
                 } actions: {
                     Button("New board") { showNewBoard = true }
+                    Button("Import board…") { showImport = true }
                 }
             }
         }
@@ -135,6 +141,7 @@ struct WorkspaceView: View {
                 Task { await model.dropActiveWorkspace() }
             }
         }
+        .boardImporter(isPresented: $showImport, store: store)
         .sheet(isPresented: $showSettings) {
             WorkspaceSettingsView(store: store)
         }

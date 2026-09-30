@@ -14,6 +14,7 @@ import * as s from "./lib/schemas.ts";
 import type { Task } from "./lib/serialize.ts";
 import { authenticate } from "./services/auth.ts";
 import * as boards from "./services/boards.ts";
+import * as transfer from "./services/boardTransfer.ts";
 import * as columns from "./services/columns.ts";
 import * as tasks from "./services/tasks.ts";
 import * as workspaces from "./services/workspaces.ts";
@@ -263,6 +264,39 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       annotations: { readOnlyHint: true },
     },
     () => run(() => workspaces.listMembers(p, workspaceId)),
+  );
+
+  server.registerTool(
+    "export_board",
+    {
+      title: "Export board",
+      description:
+        "Export a board with all columns, tasks and comments as a portable kanbot.board JSON document " +
+        "(no ids; array order is board order). Pass it to import_board to copy the board.",
+      inputSchema: { board: boardRef.optional().describe("Board id or name. Optional if the workspace has one board.") },
+      annotations: { readOnlyHint: true },
+    },
+    ({ board }) =>
+      run(async () => {
+        const b = await boards.findBoard(p, workspaceId, board);
+        return transfer.exportBoard(p, b.id);
+      }),
+  );
+
+  server.registerTool(
+    "import_board",
+    {
+      title: "Import board",
+      description:
+        "Create a new board from a kanbot.board document (as returned by export_board). Existing boards are never " +
+        "changed. Assignees are matched to members by email; tasks and comments are attributed to you.",
+      inputSchema: s.boardExport.shape,
+    },
+    (file) =>
+      run(async () => {
+        const b = await transfer.importBoard(p, workspaceId, file);
+        return { id: b.id, name: b.name };
+      }),
   );
 
   return server;

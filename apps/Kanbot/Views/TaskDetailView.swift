@@ -14,6 +14,7 @@ struct TaskDetailView: View {
     @State private var newComment = ""
     @State private var loaded = false
     @State private var confirmDelete = false
+    @State private var editingDescription = false
 
     private var task: TaskItem? { store.tasksById[taskId] }
 
@@ -46,6 +47,10 @@ struct TaskDetailView: View {
             if let task { resetDraft(task) }
             loaded = true
         }
+        // Show live edits (e.g. from an agent) unless the user is editing the description.
+        .onChange(of: task?.description) { _, description in
+            if let description, !editingDescription { details = description }
+        }
     }
 
     @ViewBuilder
@@ -73,10 +78,42 @@ struct TaskDetailView: View {
                 }
             }
 
-            Section("Description") {
-                TextEditor(text: $details)
-                    .frame(minHeight: 120)
-                    .font(.body)
+            Section {
+                if editingDescription {
+                    TextEditor(text: $details)
+                        .frame(minHeight: 160)
+                        .font(.system(.body, design: .monospaced))
+                } else if details.isEmpty {
+                    Button("Add a description…") { editingDescription = true }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                } else {
+                    MarkdownView(details) { line in
+                        details = Markdown.toggleTask(in: details, line: line)
+                        Task { await save() }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Description")
+                    Spacer()
+                    if editingDescription || !details.isEmpty {
+                        Button {
+                            if editingDescription { Task { await save() } }
+                            editingDescription.toggle()
+                        } label: {
+                            Label(editingDescription ? "Preview" : "Edit",
+                                  systemImage: editingDescription ? "eye" : "pencil")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            } footer: {
+                if editingDescription {
+                    Text(verbatim: "Supports Markdown: **bold**, *italic*, `code`, ```code blocks```, # headings, - lists, - [ ] tasks, > quotes, links.")
+                        .font(.caption)
+                }
             }
 
             Section("Comments") {
@@ -92,8 +129,7 @@ struct TaskDetailView: View {
                             Text(comment.createdAt, format: .relative(presentation: .named))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
-                        Text(LocalizedStringKey(comment.body)) // renders inline markdown
-                            .textSelection(.enabled)
+                        MarkdownView(comment.body)
                     }
                     .padding(.vertical, 2)
                 }

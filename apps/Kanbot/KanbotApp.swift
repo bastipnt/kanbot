@@ -9,7 +9,7 @@ struct KanbotApp: App {
             Group {
                 switch model.phase {
                 case .launching:
-                    ProgressView()
+                    SplashView()
                         .task { await model.launch() }
                 case .signedOut:
                     LoginView()

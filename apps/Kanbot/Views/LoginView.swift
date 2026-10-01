@@ -12,9 +12,12 @@ struct LoginView: View {
         @Bindable var model = model
         VStack(spacing: 24) {
             VStack(spacing: 6) {
-                Image(systemName: "rectangle.split.3x1.fill")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.tint)
+                Image("BrandIcon")
+                    .resizable()
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
+                    .accessibilityHidden(true)
                 Text("Kanbot").font(.largeTitle.bold())
                 Text("Kanban boards for humans and AI agents").foregroundStyle(.secondary)
             }

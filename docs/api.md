@@ -20,7 +20,7 @@ Column        { id, boardId, name, position, wipLimit /* int|null */ }
 Task          { id, boardId, columnId, title, description /* markdown */, position,
                 assigneeId /* uuid|null */, labels /* string[] */, dueAt /* string|null */,
                 createdBy: Actor, createdAt, updatedAt }
-Comment       { id, taskId, body, actor: Actor, createdAt }
+Comment       { id, taskId, body /* markdown */, actor: Actor, createdAt }
 Actor         { type: "user"|"agent", id, name }
 ApiKey        { id, workspaceId, name, prefix /* first 8 chars */, createdAt, lastUsedAt }
 BoardExport   { format: "kanbot.board", version: 1, exportedAt, board: { name },

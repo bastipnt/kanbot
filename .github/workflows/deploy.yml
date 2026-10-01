@@ -123,7 +123,7 @@ jobs:
             echo "::error::.deployed-tag is '${deployed}', expected '${IMAGE_TAG}'"
             exit 1
           fi
-          if ! grep -qE "^server .*/kanbot-server:${IMAGE_TAG}$" state.txt; then
-            echo "::error::server is not running kanbot-server:${IMAGE_TAG}"
+          if ! grep -qE "^kanbot_server .*/kanbot-server:${IMAGE_TAG}$" state.txt; then
+            echo "::error::kanbot_server is not running kanbot-server:${IMAGE_TAG}"
             exit 1
           fi

@@ -231,6 +231,7 @@ public final class WorkspaceStore {
     }
 
     private func report(_ error: Error) {
+        if error is CancellationError { return }
         lastError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 

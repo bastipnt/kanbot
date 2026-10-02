@@ -255,6 +255,8 @@ public actor APIClient {
         do {
             (data, response) = try await urlSession.data(for: request)
         } catch {
+            // The caller went away (e.g. its SwiftUI view disappeared); that's not a connectivity problem.
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled { throw CancellationError() }
             throw APIError(status: 0, code: "network", message: "Can't reach \(serverURL.host() ?? "server"): \(error.localizedDescription)")
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0

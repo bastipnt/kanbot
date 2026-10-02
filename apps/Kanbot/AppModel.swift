@@ -12,6 +12,8 @@ final class AppModel {
     private(set) var api: APIClient?
     private(set) var user: User?
     private(set) var workspaces: [Workspace] = []
+    /// True once the workspace list was fetched successfully, so an empty list really means "no workspaces".
+    private(set) var workspacesLoaded = false
     private(set) var store: WorkspaceStore?
     var lastError: String?
     var isBusy = false
@@ -39,10 +41,15 @@ final class AppModel {
         do {
             user = try await api.me()
             self.api = api
-            phase = .signedIn
+            // Load before leaving `.launching`: this runs in the splash view's `.task`, which SwiftUI
+            // cancels as soon as the phase change removes that view.
             await loadWorkspaces()
+            phase = .signedIn
         } catch let error as APIError where error.status == 401 {
             phase = .signedOut
+        } catch is CancellationError {
+            self.api = api
+            phase = .signedIn
         } catch {
             // Offline at launch: keep the session and let the user retry.
             self.api = api
@@ -57,6 +64,7 @@ final class AppModel {
         let api = makeClient(url)
         isBusy = true
         defer { isBusy = false }
+        workspacesLoaded = false
         do {
             if register, let name {
                 user = try await api.register(email: email, password: password, name: name, inviteToken: inviteToken)
@@ -80,6 +88,7 @@ final class AppModel {
         store?.stop()
         store = nil
         workspaces = []
+        workspacesLoaded = false
         user = nil
         api = nil
         phase = .signedOut
@@ -102,6 +111,7 @@ final class AppModel {
         do {
             if user == nil { user = try await api.me() }
             workspaces = try await api.workspaces()
+            workspacesLoaded = true
             lastError = nil
             let lastId = UserDefaults.standard.string(forKey: "workspaceId").flatMap(UUID.init(uuidString:))
             if let current = store?.workspace, workspaces.contains(where: { $0.id == current.id }) { return }
@@ -111,6 +121,8 @@ final class AppModel {
                 store?.stop()
                 store = nil
             }
+        } catch is CancellationError {
+            // Superseded or the calling view went away; keep the current state.
         } catch {
             lastError = error.localizedDescription
         }

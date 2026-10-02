@@ -10,7 +10,7 @@ struct RootView: View {
             if let store = model.store {
                 WorkspaceView(store: store)
                     .id(store.workspace.id)
-            } else if model.user == nil || !model.workspaces.isEmpty {
+            } else if !model.workspacesLoaded || !model.workspaces.isEmpty {
                 // Still loading, or offline at launch.
                 VStack(spacing: 12) {
                     ProgressView()

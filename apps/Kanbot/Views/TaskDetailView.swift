@@ -38,7 +38,7 @@ struct TaskDetailView: View {
             }
         }
         #if os(macOS)
-        .frame(minWidth: 520, minHeight: 620)
+        .frame(minWidth: 720, idealWidth: 780, minHeight: 620)
         #endif
         // Saves on any dismissal (Done, swipe down, Esc).
         .onDisappear { Task { await save() } }

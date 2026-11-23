@@ -132,6 +132,12 @@ export const boardRoutes = new Hono<AppEnv>()
     ),
     async (c) => c.json(await tasks.updateTask(principal(c), c.req.param("id"), c.req.valid("json"))),
   )
+  .post("/tasks/:id/labels/add", validate("json", z.object({ labels: s.labelDelta })), async (c) =>
+    c.json(await tasks.changeLabels(principal(c), c.req.param("id"), "add", c.req.valid("json").labels)),
+  )
+  .post("/tasks/:id/labels/remove", validate("json", z.object({ labels: s.labelDelta })), async (c) =>
+    c.json(await tasks.changeLabels(principal(c), c.req.param("id"), "remove", c.req.valid("json").labels)),
+  )
   .post(
     "/tasks/:id/move",
     validate("json", z.object({ columnId: z.string().min(1), ...placement })),

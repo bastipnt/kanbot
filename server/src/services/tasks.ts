@@ -147,6 +147,34 @@ export async function updateTask(p: Principal, taskId: string, patch: TaskFields
   });
 }
 
+const MAX_LABELS = 50;
+const textArray = (xs: string[]) => sql`ARRAY[${sql.join(xs.map((x) => sql`${x}`), sql`, `)}]::text[]`;
+
+/**
+ * Adds or removes labels with one UPDATE on the array column, so concurrent edits serialize on the row lock
+ * and none is lost. Existing labels keep their order; added ones go last, already-present ones are skipped.
+ */
+export async function changeLabels(p: Principal, taskId: string, op: "add" | "remove", input: string[]): Promise<Task> {
+  const { workspaceId } = await loadTask(p, taskId);
+  const given = cleanLabels(input);
+  return mutate(workspaceId, actorOf(p), async (tx, emit) => {
+    const arr = textArray(given);
+    const next =
+      op === "add"
+        ? sql`${tasks.labels} || ARRAY(SELECT a FROM unnest(${arr}) WITH ORDINALITY AS u(a, n) WHERE NOT a = ANY (${tasks.labels}) ORDER BY n)`
+        : sql`ARRAY(SELECT l FROM unnest(${tasks.labels}) WITH ORDINALITY AS t(l, n) WHERE NOT l = ANY (${arr}) ORDER BY n)`;
+    const [updated] = await tx
+      .update(tasks)
+      .set({ labels: next, updatedAt: new Date() })
+      .where(eq(tasks.id, taskId))
+      .returning();
+    if (!updated) throw notFound("Task");
+    if (updated.labels.length > MAX_LABELS) throw badRequest(`A task can have at most ${MAX_LABELS} labels`);
+    emit({ type: "task.updated", entityId: taskId, payload: toTask(updated) });
+    return toTask(updated);
+  });
+}
+
 /**
  * Move a task to a column (same board) and position. `column` is a column id or case-insensitive name.
  * Without beforeId/afterId the task goes to the end of the target column.

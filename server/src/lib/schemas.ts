@@ -8,6 +8,8 @@ export const name = z.string().trim().min(1).max(200);
 export const title = z.string().trim().min(1).max(500);
 export const description = z.string().max(50_000);
 export const labels = z.array(z.string().trim().min(1).max(64)).max(50);
+/** Labels to add to or remove from a task (at least one). */
+export const labelDelta = labels.min(1);
 export const dueAt = z.iso.datetime({ offset: true }).nullable();
 export const wipLimit = z.number().int().min(0).max(10_000).nullable();
 export const email = z.email().max(320);

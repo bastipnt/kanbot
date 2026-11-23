@@ -55,6 +55,8 @@ describe("mcp", () => {
         "get_task",
         "create_task",
         "update_task",
+        "add_labels",
+        "remove_labels",
         "move_task",
         "assign_task",
         "add_comment",
@@ -245,6 +247,19 @@ describe("mcp", () => {
 
     // Rejected by the tool's input schema (SDK validation error, not the contract error JSON).
     const bad = await client.callTool({ name: "import_board", arguments: { ...exported.data, version: 2 } });
+    expect(bad.isError).toBe(true);
+    await client.close();
+  });
+
+  test("add_labels and remove_labels change single labels as the agent", async () => {
+    const { secret } = await agentSetup();
+    const client = await mcpClient(secret);
+    const task = await call(client, "create_task", { title: "L", labels: ["a", "b"] });
+    const added = await call(client, "add_labels", { taskId: task.data.id, labels: ["b", "c"] });
+    expect(added.data.labels).toEqual(["a", "b", "c"]);
+    const removed = await call(client, "remove_labels", { taskId: task.data.id, labels: ["a", "nope"] });
+    expect(removed.data.labels).toEqual(["b", "c"]);
+    const bad = await client.callTool({ name: "add_labels", arguments: { taskId: task.data.id, labels: [] } });
     expect(bad.isError).toBe(true);
     await client.close();
   });

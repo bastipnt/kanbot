@@ -72,6 +72,8 @@ Access token: JWT, 15 min. Refresh token: opaque, 30 days, rotated on use.
 | POST | /boards/:id/tasks | {title, columnId, description?, assigneeId?, labels?, dueAt?} | Task (appended at end of column) |
 | GET | /tasks/:id?commentLimit=&commentsBefore=&description= | – | {task, comments: Comment[], commentCount, commentsNextCursor: string\|null} |
 | PATCH | /tasks/:id | any of {title, description, assigneeId, labels, dueAt} | Task |
+| POST | /tasks/:id/labels/add | {labels: string[]} (1-50) | Task |
+| POST | /tasks/:id/labels/remove | {labels: string[]} (1-50) | Task |
 | POST | /tasks/:id/move | {columnId, beforeId?, afterId?} | Task |
 | DELETE | /tasks/:id | – | 204 |
 | POST | /tasks/:id/comments | {body} | Comment |
@@ -99,7 +101,7 @@ An API key acts as `Actor{type:"agent", name: apiKey.name}` in its workspace onl
 `POST /mcp` Streamable HTTP, auth with agent API key. Tools (thin wrappers over same services):
 `list_boards`, `get_board` (columns with `taskCount`, no tasks; `includeTasks: true` returns the full board as
 before), `list_tasks` (one column's tasks, paged), `search_tasks`, `get_task`, `create_task`, `update_task`,
-`move_task` (`column` = id or case-insensitive name, e.g. "Ready for Dev"), `assign_task`
+`add_labels`, `remove_labels`, `move_task` (`column` = id or case-insensitive name, e.g. "Ready for Dev"), `assign_task`
 (by member email or name), `add_comment`, `create_column`, `reorder_columns`, `list_members`,
 `export_board`, `import_board`.
 
@@ -162,3 +164,8 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   `task.created` and `comment.created` for every imported entity, all in one transaction. Limits: 200 columns,
   10 000 tasks, 1 000 comments per task; field limits as for the regular endpoints. Unknown `format` or a
   `version` other than 1 → `400`.
+- **Single labels**: `POST /tasks/:id/labels/add` and `/labels/remove` (MCP `add_labels` / `remove_labels {taskId, labels}`)
+  change labels in one atomic statement on the server, with no prior read, so concurrent edits never lose each other.
+  Adding a label already present, or removing one that is absent, is a no-op (no duplicates; match is exact). Other
+  labels keep their order; added ones go last. Labels are trimmed and de-duplicated; each is 1-64 characters, the
+  list has 1-50 entries, and a task never exceeds 50 labels (`400` otherwise). Emits `task.updated` like `PATCH`.

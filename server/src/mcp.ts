@@ -214,12 +214,38 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
         taskId: s.uuid.describe("Task id."),
         title: s.title.optional(),
         description: s.description.optional().describe("Markdown description (replaces the existing one)."),
-        labels: s.labels.optional().describe("Complete new label list (replaces existing labels)."),
+        labels: s.labels.optional().describe("Complete new label list (replaces existing labels). To change single labels use add_labels / remove_labels."),
         dueAt: s.dueAt.optional().describe("ISO-8601 due date, or null to clear."),
       },
       annotations: { idempotentHint: true },
     },
     ({ taskId, ...patch }) => run(() => tasks.updateTask(p, taskId, patch)),
+  );
+
+  server.registerTool(
+    "add_labels",
+    {
+      title: "Add labels",
+      description:
+        "Add labels to a task without reading it first. Other labels are untouched and labels already present are " +
+        "skipped, so concurrent edits are safe. Prefer this over update_task to add a label.",
+      inputSchema: { taskId: s.uuid.describe("Task id."), labels: s.labelDelta.describe("Labels to add.") },
+      annotations: { idempotentHint: true },
+    },
+    ({ taskId, labels }) => run(() => tasks.changeLabels(p, taskId, "add", labels)),
+  );
+
+  server.registerTool(
+    "remove_labels",
+    {
+      title: "Remove labels",
+      description:
+        "Remove labels from a task without reading it first. Other labels are untouched and labels the task does " +
+        "not have are ignored, so concurrent edits are safe.",
+      inputSchema: { taskId: s.uuid.describe("Task id."), labels: s.labelDelta.describe("Labels to remove.") },
+      annotations: { idempotentHint: true },
+    },
+    ({ taskId, labels }) => run(() => tasks.changeLabels(p, taskId, "remove", labels)),
   );
 
   server.registerTool(

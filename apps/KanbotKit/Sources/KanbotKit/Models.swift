@@ -148,6 +148,26 @@ public struct BoardSnapshot: Codable, Sendable {
 public struct TaskDetail: Codable, Sendable {
     public let task: TaskItem
     public let comments: [Comment]
+    public let references: [TaskReference]
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        task = try c.decode(TaskItem.self, forKey: .task)
+        comments = try c.decode([Comment].self, forKey: .comments)
+        // Older servers do not send references.
+        references = try c.decodeIfPresent([TaskReference].self, forKey: .references) ?? []
+    }
+}
+
+/// A card named in a description or comment (docs/api.md "Task references").
+public struct TaskReference: Codable, Sendable, Hashable, Identifiable {
+    public let id: UUID
+    public let broken: Bool
+    public let title: String?
+    public let boardId: UUID?
+    public let boardName: String?
+    public let columnId: UUID?
+    public let columnName: String?
 }
 
 public struct EventPage: Codable, Sendable {

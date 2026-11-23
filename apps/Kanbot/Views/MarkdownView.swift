@@ -100,18 +100,31 @@ private struct MarkdownBlocks: View {
     }
 }
 
+private struct TaskReferencesKey: EnvironmentKey {
+    static let defaultValue: [UUID: TaskReference] = [:]
+}
+
+extension EnvironmentValues {
+    /// Cards the surrounding task names; `InlineText` links their ids.
+    var taskReferences: [UUID: TaskReference] {
+        get { self[TaskReferencesKey.self] }
+        set { self[TaskReferencesKey.self] = newValue }
+    }
+}
+
 /// One run of inline Markdown. Bold, italics, strikethrough and code spans come from
 /// `AttributedString`'s inline parser; code spans get a tinted background and bare
 /// URLs become links.
 struct InlineText: View {
-    let text: AttributedString
+    let markdown: String
+    @Environment(\.taskReferences) private var references
 
     init(_ markdown: String) {
-        text = Self.render(markdown)
+        self.markdown = markdown
     }
 
     var body: some View {
-        Text(text).fixedSize(horizontal: false, vertical: true)
+        Text(Self.render(TaskLinks.link(markdown, references: references))).fixedSize(horizontal: false, vertical: true)
     }
 
     static func render(_ markdown: String) -> AttributedString {

@@ -10,6 +10,7 @@ import { authorize, loadBoard, loadTask, requireUser } from "./access.ts";
 import { lockedBoard } from "./boards.ts";
 import { boardColumns, resolveColumn } from "./columns.ts";
 import { mutate } from "./events.ts";
+import { resolveReferences, type TaskReference } from "./references.ts";
 
 export interface TaskFields {
   title?: string;
@@ -89,6 +90,8 @@ export interface TaskDetail {
   commentCount: number;
   /** Paged reads only: pass back as `before` for older comments; null when there are none. */
   commentsNextCursor: string | null;
+  /** Cards named in the description (when included) and the returned comments. */
+  references: TaskReference[];
 }
 
 export interface TaskReadOptions {
@@ -98,7 +101,7 @@ export interface TaskReadOptions {
 }
 
 export async function getTask(p: Principal, taskId: string, opts: TaskReadOptions = {}): Promise<TaskDetail> {
-  const { task } = await loadTask(p, taskId);
+  const { task, workspaceId } = await loadTask(p, taskId);
   const [counted] = await db.select({ n: count() }).from(comments).where(eq(comments.taskId, taskId));
   const paged = opts.comments;
   let before: SQL | undefined;
@@ -117,11 +120,17 @@ export async function getTask(p: Principal, taskId: string, opts: TaskReadOption
   const rows = paged ? await query.limit(paged.limit + 1) : await query;
   const page = paged ? rows.slice(0, paged.limit) : rows;
   const { description, ...brief } = toTask(task);
+  const references = await resolveReferences(
+    workspaceId,
+    [...(opts.includeDescription === false ? [] : [description]), ...page.map((c) => c.body)],
+    taskId,
+  );
   return {
     task: opts.includeDescription === false ? brief : { ...brief, description },
     comments: page.map(toComment),
     commentCount: counted?.n ?? 0,
     commentsNextCursor: paged && rows.length > paged.limit ? page[page.length - 1]!.id : null,
+    references,
   };
 }
 

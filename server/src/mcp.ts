@@ -168,7 +168,8 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
         "Get a task's details (markdown description) and comments, plus commentCount. By default all comments, " +
         "oldest first. With comments {limit, before?} only the newest `limit` comments come back, newest first " +
         "(limit 1 = the latest comment); if commentsNextCursor is not null, pass it as comments.before for older ones. " +
-        "includeDescription false leaves the description out.",
+        "includeDescription false leaves the description out. references lists the cards named in the description and " +
+        "comments by #task:<id> or bare id (title, board, column; broken: true if a #task:<id> matches no card).",
       inputSchema: {
         taskId: s.uuid.describe("Task id."),
         comments: z

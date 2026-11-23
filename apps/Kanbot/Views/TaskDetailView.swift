@@ -4,7 +4,13 @@ import SwiftUI
 struct TaskDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var store: WorkspaceStore
-    let taskId: UUID
+    /// Follows links to other cards, so it starts at the card the sheet was opened for.
+    @State private var taskId: UUID
+
+    init(store: WorkspaceStore, taskId: UUID) {
+        self.store = store
+        _taskId = State(initialValue: taskId)
+    }
 
     @State private var title = ""
     @State private var details = ""
@@ -42,11 +48,17 @@ struct TaskDetailView: View {
         #endif
         // Saves on any dismissal (Done, swipe down, Esc).
         .onDisappear { Task { await save() } }
-        .task {
+        .task(id: taskId) {
             await store.loadTaskDetail(taskId)
             if let task { resetDraft(task) }
             loaded = true
         }
+        .environment(\.taskReferences, store.referencesByTask[taskId] ?? [:])
+        .environment(\.openURL, OpenURLAction { url in
+            guard let target = TaskLinks.taskId(from: url) else { return .systemAction }
+            Task { await open(target) }
+            return .handled
+        })
         // Show live edits (e.g. from an agent) unless the user is editing the description.
         .onChange(of: task?.description) { _, description in
             if let description, !editingDescription { details = description }
@@ -155,6 +167,16 @@ struct TaskDetailView: View {
                 dismiss()
             }
         }
+    }
+
+    /// Saves this card, then shows the target; a card on another board opens that board first.
+    private func open(_ target: UUID) async {
+        guard target != taskId, let ref = store.referencesByTask[taskId]?[target], !ref.broken else { return }
+        await save()
+        if let boardId = ref.boardId, boardId != store.openBoard?.id { await store.selectBoard(boardId) }
+        loaded = false
+        editingDescription = false
+        taskId = target
     }
 
     private func resetDraft(_ task: TaskItem) {

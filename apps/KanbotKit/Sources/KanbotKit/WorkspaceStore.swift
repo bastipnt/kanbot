@@ -25,6 +25,8 @@ public final class WorkspaceStore {
     public private(set) var tasksById: [UUID: TaskItem] = [:]
     /// Comments for tasks whose detail has been loaded.
     public private(set) var commentsByTask: [UUID: [Comment]] = [:]
+    /// Cards named in the description and comments of tasks whose detail has been loaded.
+    public private(set) var referencesByTask: [UUID: [UUID: TaskReference]] = [:]
     /// Recent events, newest first — the activity feed.
     public private(set) var activity: [Event] = []
     public private(set) var connection: ConnectionState = .connecting
@@ -162,6 +164,7 @@ public final class WorkspaceStore {
         columns = snapshot.columns.sorted(by: Column.ordered)
         tasksById = Dictionary(uniqueKeysWithValues: snapshot.tasks.map { ($0.id, $0) })
         commentsByTask = [:]
+        referencesByTask = [:]
         for event in heldEvents { applyContent(event) }
     }
 
@@ -170,6 +173,7 @@ public final class WorkspaceStore {
         columns = []
         tasksById = [:]
         commentsByTask = [:]
+        referencesByTask = [:]
     }
 
     // MARK: Event application
@@ -380,6 +384,7 @@ public final class WorkspaceStore {
             let detail = try await api.task(id: id)
             if detail.task.boardId == openBoard?.id { tasksById[id] = detail.task }
             commentsByTask[id] = detail.comments
+            referencesByTask[id] = Dictionary(detail.references.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         } catch { report(error) }
     }
 

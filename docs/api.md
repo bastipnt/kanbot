@@ -20,6 +20,7 @@ Column        { id, boardId, name, position, wipLimit /* int|null */ }
 Task          { id, boardId, columnId, title, description /* markdown */, position,
                 assigneeId /* uuid|null */, labels /* string[] */, dueAt /* string|null */,
                 createdBy: Actor, createdAt, updatedAt }
+TaskReference { id, broken, title?, boardId?, boardName?, columnId?, columnName? } /* see "Task references" */
 Comment       { id, taskId, body /* markdown */, actor: Actor, createdAt }
 Actor         { type: "user"|"agent", id, name }
 ApiKey        { id, workspaceId, name, prefix /* first 8 chars */, createdAt, lastUsedAt }
@@ -135,6 +136,12 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   `commentsBefore` without `commentLimit` → `400`). `description=false` leaves `task.description` out. MCP
   `get_task {taskId, comments?: {limit, before?}, includeDescription?}` is the same; `comments: {limit: 1}` reads
   just the latest comment. Clients ignoring the new fields keep working.
+- **Task references**: `GET /tasks/:id` and MCP `get_task` also return `references: TaskReference[]`, the cards named in
+  the description (unless `description=false`) and in the returned comments. A card is named by `#task:<id>` or a
+  bare task UUID. `TaskReference = {id, broken, title?, boardId?, boardName?, columnId?, columnName?}`, once per id in
+  order of first appearance, at most 100, the card itself left out. Only cards of the same workspace resolve. An
+  unresolved `#task:<id>` (typo, deleted card, other workspace) gives `{id, broken: true}`; an unresolved bare UUID is
+  omitted, as it may be a user, board or comment id. Typed relations (`blocks`, `parentOf`) are not part of v1.
 - **Events**: `limit` defaults to 500 (max 1000). If a page has `limit` events, page again with `since` = last seq.
   Creating a workspace records `member.added` for the owner (seq 1). `member.added` payload is a `Member`;
   `member.removed` payload is `{id: userId}`; for member events `entityId` = userId. Deleting a board emits only

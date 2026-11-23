@@ -103,7 +103,12 @@ An API key acts as `Actor{type:"agent", name: apiKey.name}` in its workspace onl
 before), `list_tasks` (one column's tasks, paged), `search_tasks`, `get_task`, `create_task`, `update_task`,
 `add_labels`, `remove_labels`, `move_task` (`column` = id or case-insensitive name, e.g. "Ready for Dev"), `assign_task`
 (by member email or name), `add_comment`, `create_column`, `reorder_columns`, `list_members`,
-`export_board`, `import_board`.
+`create_board`, `export_board`, `import_board`.
+
+`create_board {name, columns?}` creates an empty board in the key's workspace. `columns` is 1-50 unique
+(case-insensitive) names, left to right; omitted, it seeds the same default columns as `POST /workspaces/:id/boards`.
+Returns `{id, name, columns: [{id, name}]}` in board order. Events are the same as REST: `board.created`, then one
+`column.created` per column. Invalid input (empty name, empty/duplicate columns) is a tool error.
 
 ## Clarifications (server v1)
 Non-breaking notes on behaviour the tables above leave open. Nothing here changes an existing shape.

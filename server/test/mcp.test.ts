@@ -63,6 +63,7 @@ describe("mcp", () => {
         "create_column",
         "reorder_columns",
         "list_members",
+        "create_board",
         "export_board",
         "import_board",
       ].sort(),
@@ -261,6 +262,29 @@ describe("mcp", () => {
     expect(removed.data.labels).toEqual(["b", "c"]);
     const bad = await client.callTool({ name: "add_labels", arguments: { taskId: task.data.id, labels: [] } });
     expect(bad.isError).toBe(true);
+    await client.close();
+  });
+
+  test("create_board seeds default or custom columns and records the agent", async () => {
+    const { user, ws, secret } = await agentSetup();
+    const client = await mcpClient(secret);
+    const def = await call(client, "create_board", { name: "  Kanbot " });
+    expect(def.isError).toBe(false);
+    expect(def.data.name).toBe("Kanbot");
+    expect(def.data.columns.map((c: any) => c.name)).toEqual(["Backlog", "Ready for Dev", "In Progress", "Review", "Done"]);
+    const custom = await call(client, "create_board", { name: "Two", columns: ["Todo", "Done"] });
+    expect(custom.data.columns.map((c: any) => c.name)).toEqual(["Todo", "Done"]);
+
+    const snap = await api("GET", `/boards/${custom.data.id}`, { token: user.token });
+    expect(snap.body.columns.map((c: any) => c.id)).toEqual(custom.data.columns.map((c: any) => c.id));
+    const events = await api("GET", `/workspaces/${ws.id}/events?since=0`, { token: user.token });
+    const created = (events.body.events ?? events.body).find((e: any) => e.type === "board.created" && e.entityId === custom.data.id);
+    expect(created.actor).toMatchObject({ type: "agent", name: "Claude" });
+
+    for (const args of [{ name: " " }, { name: "X", columns: [] }, { name: "X", columns: [""] }, { name: "X", columns: ["a", "A"] }]) {
+      const bad = await client.callTool({ name: "create_board", arguments: args });
+      expect(bad.isError).toBe(true);
+    }
     await client.close();
   });
 });

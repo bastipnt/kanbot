@@ -16,20 +16,35 @@ export async function listBoards(p: Principal, workspaceId: string): Promise<Boa
   return rows.map(toBoard);
 }
 
-/** Creates a board and seeds the default columns; emits `board.created` then one `column.created` per column. */
-export async function createBoard(p: Principal, workspaceId: string, name: string): Promise<Board> {
+/**
+ * Creates a board and seeds its columns (`columnNames`, default `DEFAULT_COLUMNS`); emits `board.created`
+ * then one `column.created` per column. Returns the columns in board order.
+ */
+export async function createBoardWithColumns(
+  p: Principal,
+  workspaceId: string,
+  name: string,
+  columnNames: readonly string[] = DEFAULT_COLUMNS,
+): Promise<{ board: Board; columns: Column[] }> {
   await authorize(p, workspaceId);
   return mutate(workspaceId, actorOf(p), async (tx, emit) => {
     const [board] = await tx.insert(boards).values({ workspaceId, name: name.trim() }).returning();
     emit({ type: "board.created", entityId: board!.id, payload: toBoard(board!) });
-    const positions = initialPositions(DEFAULT_COLUMNS.length);
-    const cols = await tx
-      .insert(columns)
-      .values(DEFAULT_COLUMNS.map((colName, i) => ({ boardId: board!.id, name: colName, position: positions[i]! })))
-      .returning();
+    const positions = initialPositions(columnNames.length);
+    const cols =
+      columnNames.length === 0
+        ? []
+        : await tx
+            .insert(columns)
+            .values(columnNames.map((colName, i) => ({ boardId: board!.id, name: colName, position: positions[i]! })))
+            .returning();
     for (const col of cols) emit({ type: "column.created", entityId: col.id, payload: toColumn(col) });
-    return toBoard(board!);
+    return { board: toBoard(board!), columns: cols.map(toColumn) };
   });
+}
+
+export async function createBoard(p: Principal, workspaceId: string, name: string): Promise<Board> {
+  return (await createBoardWithColumns(p, workspaceId, name)).board;
 }
 
 /**

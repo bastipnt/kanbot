@@ -58,7 +58,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       instructions:
         "Kanbot is a kanban board. You act as an agent in one workspace. Typical flow: list_boards -> get_board " +
         "(columns with task counts) -> list_tasks (one column) -> act with create_task / move_task / update_task / " +
-        "assign_task / add_comment. " +
+        "assign_task / add_comment. create_board makes a new board (default columns unless you pass names). " +
         "Columns can be referenced by id or by case-insensitive name, e.g. 'Ready for Dev'.",
     },
   );
@@ -340,6 +340,31 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       annotations: { readOnlyHint: true },
     },
     () => run(() => workspaces.listMembers(p, workspaceId)),
+  );
+
+  server.registerTool(
+    "create_board",
+    {
+      title: "Create board",
+      description:
+        "Create an empty board. Without `columns` it gets the default columns (Backlog, Ready for Dev, In Progress, " +
+        "Review, Done). Returns the board id and its column ids and names in board order.",
+      inputSchema: {
+        name: s.name.describe("Board name."),
+        columns: z
+          .array(s.name)
+          .min(1)
+          .max(50)
+          .refine((l) => new Set(l.map((n) => n.toLowerCase())).size === l.length, "Column names must be unique")
+          .optional()
+          .describe("Column names, left to right. Omit for the default set."),
+      },
+    },
+    ({ name, columns: names }) =>
+      run(async () => {
+        const { board, columns: cols } = await boards.createBoardWithColumns(p, workspaceId, name, names);
+        return { id: board.id, name: board.name, columns: cols.map((c) => ({ id: c.id, name: c.name })) };
+      }),
   );
 
   server.registerTool(

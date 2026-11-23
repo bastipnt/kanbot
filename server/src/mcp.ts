@@ -57,7 +57,8 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
     {
       instructions:
         "Kanbot is a kanban board. You act as an agent in one workspace. Typical flow: list_boards -> get_board " +
-        "(columns and tasks) -> act with create_task / move_task / update_task / assign_task / add_comment. " +
+        "(columns with task counts) -> list_tasks (one column) -> act with create_task / move_task / update_task / " +
+        "assign_task / add_comment. " +
         "Columns can be referenced by id or by case-insensitive name, e.g. 'Ready for Dev'.",
     },
   );
@@ -78,23 +79,59 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
     {
       title: "Get board",
       description:
-        "Get a board with its columns (in order) and the tasks in each column (in order). " +
+        "Get a board with its columns in order (id, name, wipLimit, taskCount) but no tasks. Use list_tasks to read " +
+        "one column's tasks. Pass includeTasks=true for every column's tasks too (large boards: avoid). " +
         "Task descriptions are omitted; use get_task for full details and comments.",
-      inputSchema: { board: boardRef.optional().describe("Board id or name. Optional if the workspace has one board.") },
+      inputSchema: {
+        board: boardRef.optional().describe("Board id or name. Optional if the workspace has one board."),
+        includeTasks: z.boolean().optional().describe("Also return the tasks of every column (default false)."),
+      },
       annotations: { readOnlyHint: true },
     },
-    ({ board }) =>
+    ({ board, includeTasks }) =>
       run(async () => {
         const b = await boards.findBoard(p, workspaceId, board);
+        if (!includeTasks) {
+          const sum = await columns.boardSummary(p, b.id);
+          return {
+            board: { id: b.id, name: b.name },
+            columns: sum.columns.map((c) => ({ id: c.id, name: c.name, wipLimit: c.wipLimit, taskCount: c.taskCount })),
+          };
+        }
         const snap = await boards.getBoard(p, b.id);
         return {
           board: { id: b.id, name: b.name },
-          columns: snap.columns.map((c) => ({
-            id: c.id,
-            name: c.name,
-            wipLimit: c.wipLimit,
-            tasks: snap.tasks.filter((t) => t.columnId === c.id).map(brief),
-          })),
+          columns: snap.columns.map((c) => {
+            const colTasks = snap.tasks.filter((t) => t.columnId === c.id);
+            return { id: c.id, name: c.name, wipLimit: c.wipLimit, taskCount: colTasks.length, tasks: colTasks.map(brief) };
+          }),
+        };
+      }),
+  );
+
+  server.registerTool(
+    "list_tasks",
+    {
+      title: "List tasks in a column",
+      description:
+        "List the tasks of one column in board order, paged. If nextCursor is not null, call again with it as " +
+        "cursor to get the next page. Task descriptions are omitted; use get_task for details.",
+      inputSchema: {
+        board: boardRef.optional().describe("Board id or name. Optional if the workspace has one board."),
+        column: z.string().min(1).describe('Column id or case-insensitive name, e.g. "Review".'),
+        limit: z.number().int().min(1).max(500).optional().describe("Tasks per page (default 50)."),
+        cursor: z.string().min(1).optional().describe("nextCursor from the previous page."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    ({ board, column, limit, cursor }) =>
+      run(async () => {
+        const b = await boards.findBoard(p, workspaceId, board);
+        const page = await columns.listColumnTasks(p, b.id, column, { limit: limit ?? 50, cursor });
+        return {
+          column: { id: page.column.id, name: page.column.name, wipLimit: page.column.wipLimit },
+          tasks: page.tasks.map(brief),
+          nextCursor: page.nextCursor,
         };
       }),
   );

@@ -109,7 +109,8 @@ claude mcp add --transport http kanbot http://localhost:8787/mcp --header "Autho
 ```
 
 Then ask Claude things like *"Move the login task to Ready for Dev and leave a comment"*. Available tools:
-`list_boards`, `get_board`, `search_tasks`, `get_task`, `create_task`, `update_task`, `move_task`, `assign_task`,
+`list_boards`, `get_board` (columns with task counts only; `includeTasks` for the full board), `list_tasks` (one
+column, paged), `search_tasks`, `get_task`, `create_task`, `update_task`, `move_task`, `assign_task`,
 `add_comment`, `create_column`, `reorder_columns`, `list_members`, `export_board`, `import_board`. Every change made by an agent is recorded with
 `Actor{type:"agent"}` and streamed live to the apps.
 

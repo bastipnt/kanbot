@@ -50,6 +50,7 @@ describe("mcp", () => {
       [
         "list_boards",
         "get_board",
+        "list_tasks",
         "search_tasks",
         "get_task",
         "create_task",
@@ -65,6 +66,43 @@ describe("mcp", () => {
       ].sort(),
     );
     for (const t of tools) expect(t.description?.length).toBeGreaterThan(10);
+    await client.close();
+  });
+
+  test("get_board returns counts without tasks; list_tasks pages one column", async () => {
+    const { user, board, col, secret } = await agentSetup();
+    for (const t of ["a", "b", "c", "d", "e"]) await createTask(user, board.id, col("Review").id, t);
+    await createTask(user, board.id, col("Backlog").id, "x");
+    const client = await mcpClient(secret);
+
+    const snap = await call(client, "get_board", { board: board.id });
+    expect(snap.data.columns.every((c: any) => c.tasks === undefined)).toBe(true);
+    expect(snap.data.columns.map((c: any) => [c.name, c.taskCount, c.wipLimit])).toEqual([
+      ["Backlog", 1, null],
+      ["Ready for Dev", 0, null],
+      ["In Progress", 0, null],
+      ["Review", 5, null],
+      ["Done", 0, null],
+    ]);
+
+    const titles: string[] = [];
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const page = await call(client, "list_tasks", { board: board.id, column: "rEVIEW", limit: 2, cursor });
+      expect(page.data.column.id).toBe(col("Review").id);
+      titles.push(...page.data.tasks.map((t: any) => t.title));
+      cursor = page.data.nextCursor ?? undefined;
+      pages++;
+    } while (cursor);
+    expect(titles).toEqual(["a", "b", "c", "d", "e"]);
+    expect(pages).toBe(3);
+
+    const byId = await call(client, "list_tasks", { column: col("Backlog").id });
+    expect(byId.data.tasks.map((t: any) => t.title)).toEqual(["x"]);
+    expect(byId.data.nextCursor).toBeNull();
+    const bad = await call(client, "list_tasks", { column: "nope" });
+    expect(bad.isError).toBe(true);
     await client.close();
   });
 
@@ -112,7 +150,7 @@ describe("mcp", () => {
     expect(created.data.createdBy.type).toBe("agent");
 
     const defaultCol = await call(client, "create_task", { board: "board", title: "Goes to backlog" });
-    const snap = await call(client, "get_board", { board: board.id });
+    const snap = await call(client, "get_board", { board: board.id, includeTasks: true });
     const byName = Object.fromEntries(snap.data.columns.map((c: any) => [c.name, c.tasks.map((t: any) => t.title)]));
     expect(byName["In Progress"]).toEqual(["Agent task"]);
     expect(byName["Backlog"]).toEqual(["Goes to backlog"]);

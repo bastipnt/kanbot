@@ -1,11 +1,11 @@
-import { asc, count, eq } from "drizzle-orm";
-import type { Executor, Tx } from "../db/index.ts";
+import { and, asc, count, eq, gt, or, sql } from "drizzle-orm";
+import { db, type Executor, type Tx } from "../db/index.ts";
 import { columns, tasks, type ColumnRow } from "../db/schema.ts";
 import { isUuid } from "../lib/crypto.ts";
 import { ApiError, badRequest, conflict, notFound } from "../lib/errors.ts";
 import { computePosition, initialPositions, type Placement } from "../lib/position.ts";
 import { actorOf, type Principal } from "../lib/principal.ts";
-import { toColumn, type Column } from "../lib/serialize.ts";
+import { toBoard, toColumn, toTask, type Board, type Column, type Task } from "../lib/serialize.ts";
 import { loadBoard, loadColumn, requireUser } from "./access.ts";
 import { lockedBoard } from "./boards.ts";
 import { mutate } from "./events.ts";
@@ -128,4 +128,61 @@ export async function reorderColumns(p: Principal, boardId: string, order: strin
     }
     return result;
   });
+}
+
+export interface ColumnSummary extends Column {
+  taskCount: number;
+}
+
+/** Board and its columns with task counts, without loading any tasks. */
+export async function boardSummary(p: Principal, boardId: string): Promise<{ board: Board; columns: ColumnSummary[] }> {
+  const board = await loadBoard(p, boardId);
+  const [cols, counts] = await Promise.all([
+    boardColumns(db, board.id),
+    db.select({ columnId: tasks.columnId, n: count() }).from(tasks).where(eq(tasks.boardId, board.id)).groupBy(tasks.columnId),
+  ]);
+  const byColumn = new Map(counts.map((r) => [r.columnId, r.n]));
+  return { board: toBoard(board), columns: cols.map((c) => ({ ...toColumn(c), taskCount: byColumn.get(c.id) ?? 0 })) };
+}
+
+// Keyset cursor on the board order (position, id): stable while tasks are added, moved or deleted.
+const encodeCursor = (t: { position: string; id: string }) =>
+  Buffer.from(JSON.stringify([t.position, t.id])).toString("base64url");
+
+function decodeCursor(cursor: string): [string, string] {
+  try {
+    const v = JSON.parse(Buffer.from(cursor, "base64url").toString());
+    if (Array.isArray(v) && v.length === 2 && typeof v[0] === "string" && isUuid(v[1])) return [v[0], v[1]];
+  } catch {}
+  throw badRequest("Invalid cursor");
+}
+
+/** One column's tasks in board order, `limit` per page; `nextCursor` is null on the last page. */
+export async function listColumnTasks(
+  p: Principal,
+  boardId: string,
+  columnRef: string,
+  opts: { limit: number; cursor?: string },
+): Promise<{ column: Column; tasks: Task[]; nextCursor: string | null }> {
+  const board = await loadBoard(p, boardId);
+  const col = await resolveColumn(db, board.id, columnRef);
+  const after = opts.cursor ? decodeCursor(opts.cursor) : undefined;
+  const afterPos = after && sql`${after[0]} COLLATE "C"`;
+  const rows = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.columnId, col.id),
+        after && or(gt(tasks.position, afterPos!), and(eq(tasks.position, afterPos!), gt(tasks.id, after[1]))),
+      ),
+    )
+    .orderBy(asc(tasks.position), asc(tasks.id))
+    .limit(opts.limit + 1);
+  const page = rows.slice(0, opts.limit);
+  return {
+    column: toColumn(col),
+    tasks: page.map(toTask),
+    nextCursor: rows.length > opts.limit ? encodeCursor(page[page.length - 1]!) : null,
+  };
 }

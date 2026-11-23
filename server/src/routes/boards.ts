@@ -22,6 +22,16 @@ export const boardRoutes = new Hono<AppEnv>()
     c.json(await boards.createBoard(principal(c), c.req.param("id"), c.req.valid("json").name)),
   )
   .get("/boards/:id", async (c) => c.json(await boards.getBoard(principal(c), c.req.param("id"))))
+  .get("/boards/:id/columns", async (c) => c.json(await columns.boardSummary(principal(c), c.req.param("id"))))
+  .get(
+    "/boards/:id/columns/:column/tasks",
+    validate(
+      "query",
+      z.object({ limit: z.coerce.number().int().min(1).max(500).default(50), cursor: z.string().max(500).optional() }),
+    ),
+    async (c) =>
+      c.json(await columns.listColumnTasks(principal(c), c.req.param("id"), c.req.param("column"), c.req.valid("query"))),
+  )
   .patch("/boards/:id", validate("json", z.object({ name: s.name })), async (c) =>
     c.json(await boards.updateBoard(principal(c), c.req.param("id"), c.req.valid("json"))),
   )

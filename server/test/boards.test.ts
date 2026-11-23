@@ -166,3 +166,38 @@ describe("boards, columns, tasks", () => {
     expect(res.body.columnId).toBe(col("Ready for Dev").id);
   });
 });
+
+describe("reading a board by column", () => {
+  test("GET /boards/:id/columns has counts and no tasks; column tasks page by id or name", async () => {
+    const { user, board, col } = await setup();
+    for (const t of ["a", "b", "c"]) await createTask(user, board.id, col("Done").id, t);
+    const sum = await api("GET", `/boards/${board.id}/columns`, { token: user.token });
+    expect(sum.status).toBe(200);
+    expect(sum.body.tasks).toBeUndefined();
+    expect(sum.body.columns.find((c: any) => c.name === "Done")).toMatchObject({ taskCount: 3, wipLimit: null });
+
+    const p1 = await api("GET", `/boards/${board.id}/columns/done/tasks?limit=2`, { token: user.token });
+    expect(p1.body.tasks.map((t: any) => t.title)).toEqual(["a", "b"]);
+    const p2 = await api(
+      "GET",
+      `/boards/${board.id}/columns/${col("Done").id}/tasks?limit=2&cursor=${p1.body.nextCursor}`,
+      { token: user.token },
+    );
+    expect(p2.body.tasks.map((t: any) => t.title)).toEqual(["c"]);
+    expect(p2.body.nextCursor).toBeNull();
+
+    const ready = await api("GET", `/boards/${board.id}/columns/Ready%20for%20Dev/tasks`, { token: user.token });
+    expect(ready.body.tasks).toEqual([]);
+    expect((await api("GET", `/boards/${board.id}/columns/nope/tasks`, { token: user.token })).status).toBe(404);
+    expect((await api("GET", `/boards/${board.id}/columns/done/tasks?cursor=xx`, { token: user.token })).status).toBe(400);
+    const notUuid = Buffer.from(JSON.stringify(["a0", "x"])).toString("base64url");
+    expect((await api("GET", `/boards/${board.id}/columns/done/tasks?cursor=${notUuid}`, { token: user.token })).status).toBe(400);
+  });
+
+  test("the full snapshot stays unchanged", async () => {
+    const { user, board, col } = await setup();
+    await createTask(user, board.id, col("Done").id, "a");
+    const snap = await api("GET", `/boards/${board.id}`, { token: user.token });
+    expect(snap.body.tasks).toHaveLength(1);
+  });
+});

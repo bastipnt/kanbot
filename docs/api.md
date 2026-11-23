@@ -59,7 +59,9 @@ Access token: JWT, 15 min. Refresh token: opaque, 30 days, rotated on use.
 |---|---|---|---|
 | GET | /workspaces/:id/boards | – | Board[] |
 | POST | /workspaces/:id/boards | {name} | Board (seeds columns: Backlog, Ready for Dev, In Progress, Review, Done) |
-| GET | /boards/:id | – | {board, columns: Column[], tasks: Task[]} |
+| GET | /boards/:id | – | {board, columns: Column[], tasks: Task[]} (full snapshot, all tasks; used for sync) |
+| GET | /boards/:id/columns | – | {board, columns: (Column & {taskCount})[]} (no tasks) |
+| GET | /boards/:id/columns/:column/tasks?limit=&cursor= | – | {column: Column, tasks: Task[], nextCursor: string\|null} |
 | PATCH | /boards/:id | {name} | Board |
 | DELETE | /boards/:id | – | 204 (admin+) |
 | GET | /boards/:id/export | – | BoardExport (`Content-Disposition: attachment`) |
@@ -95,7 +97,8 @@ An API key acts as `Actor{type:"agent", name: apiKey.name}` in its workspace onl
 
 ## MCP
 `POST /mcp` Streamable HTTP, auth with agent API key. Tools (thin wrappers over same services):
-`list_boards`, `get_board`, `search_tasks`, `get_task`, `create_task`, `update_task`,
+`list_boards`, `get_board` (columns with `taskCount`, no tasks; `includeTasks: true` returns the full board as
+before), `list_tasks` (one column's tasks, paged), `search_tasks`, `get_task`, `create_task`, `update_task`,
 `move_task` (`column` = id or case-insensitive name, e.g. "Ready for Dev"), `assign_task`
 (by member email or name), `add_comment`, `create_column`, `reorder_columns`, `list_members`,
 `export_board`, `import_board`.
@@ -113,6 +116,12 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   case-insensitive column name (same resolution as MCP `move_task`). Moving to a column of another board → `404`.
 - **Search**: `GET /workspaces/:id/tasks/search?q=&boardId=&limit=` — `boardId` and `limit` (default 100, max 500) are
   optional. Matches title/description (case-insensitive substring) or an exact label; most recently updated first.
+- **Reading one column**: `GET /boards/:id/columns/:column/tasks` — `:column` is a column id or case-insensitive name
+  (URL-encoded); unknown → `404`, several with that name → `409`. Tasks come in board order (as in the snapshot).
+  `limit` defaults to 50 (max 500). `nextCursor` is an opaque string, `null` on the last page; pass it back as `cursor`
+  to continue (a malformed cursor → `400`). MCP `list_tasks {board?, column, limit?, cursor?}` returns the same
+  `{column, tasks, nextCursor}` with brief tasks (no description). MCP `get_board` returns
+  `{board, columns: [{id, name, wipLimit, taskCount}]}`; with `includeTasks: true` each column also has `tasks`.
 - **Events**: `limit` defaults to 500 (max 1000). If a page has `limit` events, page again with `since` = last seq.
   Creating a workspace records `member.added` for the owner (seq 1). `member.added` payload is a `Member`;
   `member.removed` payload is `{id: userId}`; for member events `entityId` = userId. Deleting a board emits only

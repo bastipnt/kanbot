@@ -106,6 +106,30 @@ describe("mcp", () => {
     await client.close();
   });
 
+  test("get_task reads only the newest comment, then pages back", async () => {
+    const { user, board, col, secret } = await agentSetup();
+    const task = await createTask(user, board.id, col("Backlog").id, "T");
+    const client = await mcpClient(secret);
+    for (const body of ["one", "two", "three"]) await call(client, "add_comment", { taskId: task.id, body });
+
+    const latest = await call(client, "get_task", { taskId: task.id, comments: { limit: 1 }, includeDescription: false });
+    expect(latest.data.comments.map((c: any) => c.body)).toEqual(["three"]);
+    expect(latest.data.commentCount).toBe(3);
+    expect(latest.data.task.description).toBeUndefined();
+
+    const older = await call(client, "get_task", {
+      taskId: task.id,
+      comments: { limit: 5, before: latest.data.commentsNextCursor },
+    });
+    expect(older.data.comments.map((c: any) => c.body)).toEqual(["two", "one"]);
+    expect(older.data.commentsNextCursor).toBeNull();
+
+    const all = await call(client, "get_task", { taskId: task.id });
+    expect(all.data.comments.map((c: any) => c.body)).toEqual(["one", "two", "three"]);
+    expect(all.data.task.description).toBeDefined();
+    await client.close();
+  });
+
   test("move_task by column name records an agent event and pushes it over WebSocket", async () => {
     const { user, ws, board, col, secret, apiKeyId } = await agentSetup();
     const task = await createTask(user, board.id, col("Backlog").id, "Implement login");

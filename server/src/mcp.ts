@@ -164,11 +164,24 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
     "get_task",
     {
       title: "Get task",
-      description: "Get a task's full details (including markdown description) and its comments.",
-      inputSchema: { taskId: s.uuid.describe("Task id.") },
+      description:
+        "Get a task's details (markdown description) and comments, plus commentCount. By default all comments, " +
+        "oldest first. With comments {limit, before?} only the newest `limit` comments come back, newest first " +
+        "(limit 1 = the latest comment); if commentsNextCursor is not null, pass it as comments.before for older ones. " +
+        "includeDescription false leaves the description out.",
+      inputSchema: {
+        taskId: s.uuid.describe("Task id."),
+        comments: z
+          .object({
+            limit: z.number().int().min(1).max(500).describe("Newest comments to return."),
+            before: s.uuid.optional().describe("commentsNextCursor from the previous page."),
+          })
+          .optional(),
+        includeDescription: z.boolean().optional().describe("false omits the description (default true)."),
+      },
       annotations: { readOnlyHint: true },
     },
-    ({ taskId }) => run(() => tasks.getTask(p, taskId)),
+    ({ taskId, comments, includeDescription }) => run(() => tasks.getTask(p, taskId, { comments, includeDescription })),
   );
 
   server.registerTool(

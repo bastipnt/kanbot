@@ -200,4 +200,33 @@ describe("reading a board by column", () => {
     const snap = await api("GET", `/boards/${board.id}`, { token: user.token });
     expect(snap.body.tasks).toHaveLength(1);
   });
+
+  test("task read pages comments newest first, with count and optional description", async () => {
+    const { user, board, col } = await setup();
+    const task = await createTask(user, board.id, col("Backlog").id, "T");
+    for (const body of ["c1", "c2", "c3", "c4", "c5"])
+      await api("POST", `/tasks/${task.id}/comments`, { token: user.token, body: { body } });
+
+    const all = await api("GET", `/tasks/${task.id}`, { token: user.token });
+    expect(all.body.comments.map((c: any) => c.body)).toEqual(["c1", "c2", "c3", "c4", "c5"]);
+    expect(all.body.commentCount).toBe(5);
+
+    const latest = await api("GET", `/tasks/${task.id}?commentLimit=1`, { token: user.token });
+    expect(latest.body.comments.map((c: any) => c.body)).toEqual(["c5"]);
+    expect(latest.body.commentCount).toBe(5);
+
+    const seen: string[] = [];
+    let before: string | null = null;
+    do {
+      const q: string = `commentLimit=2${before ? `&commentsBefore=${before}` : ""}`;
+      const page: any = await api("GET", `/tasks/${task.id}?${q}&description=false`, { token: user.token });
+      expect(page.body.task.description).toBeUndefined();
+      seen.push(...page.body.comments.map((c: any) => c.body));
+      before = page.body.commentsNextCursor;
+    } while (before);
+    expect(seen).toEqual(["c5", "c4", "c3", "c2", "c1"]);
+
+    expect((await api("GET", `/tasks/${task.id}?commentLimit=2&commentsBefore=${task.id}`, { token: user.token })).status).toBe(400);
+    expect((await api("GET", `/tasks/${task.id}?commentsBefore=${task.id}`, { token: user.token })).status).toBe(400);
+  });
 });

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { db, type Executor, type Tx } from "../db/index.ts";
 import { boards, comments, tasks, users, workspaceMembers, type TaskRow } from "../db/schema.ts";
 import { isUuid } from "../lib/crypto.ts";
@@ -83,14 +83,46 @@ export async function createTask(
   });
 }
 
-export async function getTask(p: Principal, taskId: string): Promise<{ task: Task; comments: Comment[] }> {
+export interface TaskDetail {
+  task: Task | Omit<Task, "description">;
+  comments: Comment[];
+  commentCount: number;
+  /** Paged reads only: pass back as `before` for older comments; null when there are none. */
+  commentsNextCursor: string | null;
+}
+
+export interface TaskReadOptions {
+  /** Set: newest `limit` comments first, older than comment `before`. Unset: all, oldest first. */
+  comments?: { limit: number; before?: string };
+  includeDescription?: boolean;
+}
+
+export async function getTask(p: Principal, taskId: string, opts: TaskReadOptions = {}): Promise<TaskDetail> {
   const { task } = await loadTask(p, taskId);
-  const rows = await db
+  const [counted] = await db.select({ n: count() }).from(comments).where(eq(comments.taskId, taskId));
+  const paged = opts.comments;
+  let before: SQL | undefined;
+  if (paged?.before) {
+    if (!isUuid(paged.before)) throw badRequest("Invalid cursor");
+    // Compare inside SQL: a JS Date would truncate the microseconds of created_at.
+    before = sql`(${comments.createdAt}, ${comments.id}) < (select c.created_at, c.id from comments c where c.id = ${paged.before} and c.task_id = ${taskId})`;
+    const [ok] = await db.select({ id: comments.id }).from(comments).where(and(eq(comments.id, paged.before), eq(comments.taskId, taskId)));
+    if (!ok) throw badRequest("Invalid cursor");
+  }
+  const query = db
     .select()
     .from(comments)
-    .where(eq(comments.taskId, taskId))
-    .orderBy(asc(comments.createdAt), asc(comments.id));
-  return { task: toTask(task), comments: rows.map(toComment) };
+    .where(and(eq(comments.taskId, taskId), before))
+    .orderBy(...(paged ? [desc(comments.createdAt), desc(comments.id)] : [asc(comments.createdAt), asc(comments.id)]));
+  const rows = paged ? await query.limit(paged.limit + 1) : await query;
+  const page = paged ? rows.slice(0, paged.limit) : rows;
+  const { description, ...brief } = toTask(task);
+  return {
+    task: opts.includeDescription === false ? brief : { ...brief, description },
+    comments: page.map(toComment),
+    commentCount: counted?.n ?? 0,
+    commentsNextCursor: paged && rows.length > paged.limit ? page[page.length - 1]!.id : null,
+  };
 }
 
 export async function updateTask(p: Principal, taskId: string, patch: TaskFields): Promise<Task> {

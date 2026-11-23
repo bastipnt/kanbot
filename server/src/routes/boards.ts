@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { badRequest } from "../lib/errors.ts";
 import { principal, validate, type AppEnv } from "../lib/http.ts";
 import * as s from "../lib/schemas.ts";
 import * as boards from "../services/boards.ts";
@@ -96,7 +97,27 @@ export const boardRoutes = new Hono<AppEnv>()
       return c.json(await tasks.createTask(principal(c), c.req.param("id"), { ...rest, column: columnId }));
     },
   )
-  .get("/tasks/:id", async (c) => c.json(await tasks.getTask(principal(c), c.req.param("id"))))
+  .get(
+    "/tasks/:id",
+    validate(
+      "query",
+      z.object({
+        commentLimit: z.coerce.number().int().min(1).max(500).optional(),
+        commentsBefore: s.uuid.optional(),
+        description: z.enum(["true", "false"]).optional(),
+      }),
+    ),
+    async (c) => {
+      const q = c.req.valid("query");
+      if (q.commentsBefore && !q.commentLimit) throw badRequest("commentsBefore needs commentLimit");
+      return c.json(
+        await tasks.getTask(principal(c), c.req.param("id"), {
+          comments: q.commentLimit ? { limit: q.commentLimit, before: q.commentsBefore } : undefined,
+          includeDescription: q.description !== "false",
+        }),
+      );
+    },
+  )
   .patch(
     "/tasks/:id",
     validate(

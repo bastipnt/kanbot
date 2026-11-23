@@ -70,7 +70,7 @@ Access token: JWT, 15 min. Refresh token: opaque, 30 days, rotated on use.
 | PATCH | /columns/:id | {name?, wipLimit?, beforeId?, afterId?} | Column |
 | DELETE | /columns/:id | – | 204 (409 if not empty) |
 | POST | /boards/:id/tasks | {title, columnId, description?, assigneeId?, labels?, dueAt?} | Task (appended at end of column) |
-| GET | /tasks/:id | – | {task, comments: Comment[]} |
+| GET | /tasks/:id?commentLimit=&commentsBefore=&description= | – | {task, comments: Comment[], commentCount, commentsNextCursor: string\|null} |
 | PATCH | /tasks/:id | any of {title, description, assigneeId, labels, dueAt} | Task |
 | POST | /tasks/:id/move | {columnId, beforeId?, afterId?} | Task |
 | DELETE | /tasks/:id | – | 204 |
@@ -122,6 +122,12 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   to continue (a malformed cursor → `400`). MCP `list_tasks {board?, column, limit?, cursor?}` returns the same
   `{column, tasks, nextCursor}` with brief tasks (no description). MCP `get_board` returns
   `{board, columns: [{id, name, wipLimit, taskCount}]}`; with `includeTasks: true` each column also has `tasks`.
+- **Reading one task**: `GET /tasks/:id` returns all comments oldest first (as before) plus `commentCount`;
+  `commentsNextCursor` is `null`. With `commentLimit` (1-500) only the newest that many comments come back, newest
+  first; if `commentsNextCursor` is not null, pass it as `commentsBefore` for the next older page (unknown cursor, or
+  `commentsBefore` without `commentLimit` → `400`). `description=false` leaves `task.description` out. MCP
+  `get_task {taskId, comments?: {limit, before?}, includeDescription?}` is the same; `comments: {limit: 1}` reads
+  just the latest comment. Clients ignoring the new fields keep working.
 - **Events**: `limit` defaults to 500 (max 1000). If a page has `limit` events, page again with `since` = last seq.
   Creating a workspace records `member.added` for the owner (seq 1). `member.added` payload is a `Member`;
   `member.removed` payload is `{id: userId}`; for member events `entityId` = userId. Deleting a board emits only

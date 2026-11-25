@@ -67,8 +67,8 @@ Access token: JWT, 15 min. Refresh token: opaque, 30 days, rotated on use.
 | DELETE | /boards/:id | – | 204 (admin+) |
 | GET | /boards/:id/export | – | BoardExport (`Content-Disposition: attachment`) |
 | POST | /workspaces/:id/boards/import | BoardExport | Board (always a new board) |
-| POST | /boards/:id/columns | {name, afterId?, wipLimit?} | Column |
-| PATCH | /columns/:id | {name?, wipLimit?, beforeId?, afterId?} | Column |
+| POST | /boards/:id/columns | {name, afterId?, wipLimit?} | Column (409 if the name is taken) |
+| PATCH | /columns/:id | {name?, wipLimit?, beforeId?, afterId?} | Column (409 if the name is taken) |
 | DELETE | /columns/:id | – | 204 (409 if not empty) |
 | POST | /boards/:id/tasks | {title, columnId, description?, assigneeId?, labels?, dueAt?} | Task (appended at end of column) |
 | GET | /tasks/:id?commentLimit=&commentsBefore=&description= | – | {task, comments: Comment[], commentCount, commentsNextCursor: string\|null} |
@@ -106,8 +106,9 @@ before), `list_tasks` (one column's tasks, paged), `search_tasks`, `get_task`, `
 (by member email or name), `add_comment`, `create_column`, `reorder_columns`, `list_members`,
 `create_board`, `export_board`, `import_board`.
 
-`create_board {name, columns?}` creates an empty board in the key's workspace. `columns` is 1-50 unique
-(case-insensitive) names, left to right; omitted, it seeds the same default columns as `POST /workspaces/:id/boards`.
+`create_board {name, columns?}` creates an empty board in the key's workspace. `columns` is 1-50 names, left to
+right, unique within the board in any case (see **Column names**); omitted, it seeds the same default columns as
+`POST /workspaces/:id/boards`.
 Returns `{id, name, columns: [{id, name}]}` in board order. Events are the same as REST: `board.created`, then one
 `column.created` per column. Invalid input (empty name, empty/duplicate columns) is a tool error.
 
@@ -122,6 +123,13 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   goes to the end; `PATCH /columns/:id` without them keeps the current position.
 - **Column references**: `columnId` in `POST /boards/:id/tasks` and `POST /tasks/:id/move` also accepts a
   case-insensitive column name (same resolution as MCP `move_task`). Moving to a column of another board → `404`.
+- **Column names**: unique within a board, compared after trimming and collapsing inner whitespace, in any case
+  (`Done`, ` done ` and `DONE` are the same name). `POST /boards/:id/columns` and a rename via `PATCH /columns/:id`
+  fail with `409 conflict` naming the existing column; a rename that only changes the case of the column's own name is
+  allowed. MCP `create_column` fails the same way. The rule only covers columns added or renamed under it, so a board
+  created before it may still hold a repeated name; there every name-based call (`move_task`, column lookup,
+  `reorder_columns`) returns `409` for that name, while on a board whose columns all went through the rule a name
+  resolves to exactly one column.
 - **Search**: `GET /workspaces/:id/tasks/search?q=&boardId=&limit=` — `boardId` and `limit` (default 100, max 500) are
   optional. Matches title/description (case-insensitive substring) or an exact label; most recently updated first.
 - **Reading one column**: `GET /boards/:id/columns/:column/tasks` — `:column` is a column id or case-insensitive name
@@ -174,8 +182,10 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   (attribution in a file can't be verified), and a comment whose original author name differs from the importer's
   gets its body prefixed with `*Originally by <name>*` + blank line. Events: `board.created`, then `column.created`,
   `task.created` and `comment.created` for every imported entity, all in one transaction. Limits: 200 columns,
-  10 000 tasks, 1 000 comments per task; field limits as for the regular endpoints. Unknown `format` or a
-  `version` other than 1 → `400`.
+  10 000 tasks, 1 000 comments per task; field limits as for the regular endpoints. Import applies the **Column
+  names** rule: a file that repeats a column name in any case is rejected with `400` naming the duplicates. A board
+  created before the rule can still hold such a repeat, so exporting it and importing that file fails until the
+  duplicate is renamed. Unknown `format` or a `version` other than 1 → `400`.
 - **Single labels**: `POST /tasks/:id/labels/add` and `/labels/remove` (MCP `add_labels` / `remove_labels {taskId, labels}`)
   change labels in one atomic statement on the server, with no prior read, so concurrent edits never lose each other.
   Adding a label already present, or removing one that is absent, is a no-op (no duplicates; match is exact). Other

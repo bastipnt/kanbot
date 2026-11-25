@@ -55,6 +55,30 @@ describe("boards, columns, tasks", () => {
     expect((await api("DELETE", `/columns/${col("Done").id}`, { token: user.token })).status).toBe(204);
   });
 
+  test("column names are unique per board, in any case", async () => {
+    const { user, board, col } = await setup();
+    const create = (name: string) =>
+      api("POST", `/boards/${board.id}/columns`, { token: user.token, body: { name } });
+    const rename = (id: string, name: string) => api("PATCH", `/columns/${id}`, { token: user.token, body: { name } });
+
+    for (const name of [" done ", "DONE", "in  progress"]) {
+      const res = await create(name);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatchObject({ code: "conflict" });
+      expect(res.body.error.message).toContain("already exists on this board");
+    }
+    expect((await create("QA")).status).toBe(200);
+    expect((await create("QA gate")).status).toBe(200);
+
+    const clash = await rename(col("Done").id, "qA");
+    expect(clash.status).toBe(409);
+    expect(clash.body.error).toMatchObject({ code: "conflict", message: expect.stringContaining("QA") });
+    // A rename that only changes the case of the column's own name is not a clash.
+    const self = await rename(col("Review").id, "review");
+    expect(self.status).toBe(200);
+    expect(self.body.name).toBe("review");
+  });
+
   test("task CRUD, comments, search", async () => {
     const { user, ws, board, col } = await setup();
     const created = await api("POST", `/boards/${board.id}/tasks`, {

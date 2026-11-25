@@ -184,6 +184,22 @@ describe("board export/import", () => {
     expect(malformed.status).toBe(400);
   });
 
+  test("rejects a file whose column names repeat in any case", async () => {
+    const { user, ws } = await setup();
+    const post = (columns: unknown[]) =>
+      api("POST", `/workspaces/${ws.id}/boards/import`, {
+        token: user.token,
+        body: { format: "kanbot.board", version: 1, board: { name: "B" }, columns },
+      });
+    const before = (await api("GET", `/workspaces/${ws.id}/boards`, { token: user.token })).body.length;
+
+    const res = await post([{ name: "Done" }, { name: "Doing" }, { name: " done " }]);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatchObject({ code: "bad_request", message: 'columns: Duplicate column names: "done"' });
+    expect((await post([{ name: "In Progress" }, { name: "in  progress" }])).status).toBe(400);
+    expect((await api("GET", `/workspaces/${ws.id}/boards`, { token: user.token })).body.length).toBe(before);
+  });
+
   test("permissions", async () => {
     const { user, ws, board, secret } = await populatedBoard();
     const outsider = await registerUser("Outsider");

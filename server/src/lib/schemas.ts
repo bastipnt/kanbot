@@ -1,5 +1,6 @@
 /** Shared zod schemas for request validation (REST) and tool inputs (MCP). */
 import { z } from "zod";
+import { duplicateColumnNamesMessage } from "./columnNames.ts";
 
 export const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "must be a UUID");
 export const idParam = z.object({ id: uuid });
@@ -50,6 +51,11 @@ export const boardExport = z.object({
           .optional(),
       }),
     )
-    .max(200),
+    .max(200)
+    // A column name identifies a column on a board, also right after an import.
+    .superRefine((cols, ctx) => {
+      const message = duplicateColumnNamesMessage(cols.map((c) => c.name));
+      if (message) ctx.addIssue({ code: "custom", message });
+    }),
 });
 export type BoardExport = z.infer<typeof boardExport>;

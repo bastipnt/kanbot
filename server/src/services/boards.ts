@@ -1,7 +1,8 @@
 import { asc, eq } from "drizzle-orm";
 import { db, type Tx } from "../db/index.ts";
 import { boards, columns, tasks, type BoardRow } from "../db/schema.ts";
-import { ApiError, notFound } from "../lib/errors.ts";
+import { duplicateColumnNamesMessage } from "../lib/columnNames.ts";
+import { ApiError, badRequest, notFound } from "../lib/errors.ts";
 import { initialPositions } from "../lib/position.ts";
 import { actorOf, type Principal } from "../lib/principal.ts";
 import { toBoard, toColumn, toTask, type Board, type Column, type Task } from "../lib/serialize.ts";
@@ -27,6 +28,8 @@ export async function createBoardWithColumns(
   columnNames: readonly string[] = DEFAULT_COLUMNS,
 ): Promise<{ board: Board; columns: Column[] }> {
   await authorize(p, workspaceId);
+  const duplicateNames = duplicateColumnNamesMessage(columnNames);
+  if (duplicateNames) throw badRequest(duplicateNames);
   return mutate(workspaceId, actorOf(p), async (tx, emit) => {
     const [board] = await tx.insert(boards).values({ workspaceId, name: name.trim() }).returning();
     emit({ type: "board.created", entityId: board!.id, payload: toBoard(board!) });

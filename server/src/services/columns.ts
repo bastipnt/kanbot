@@ -2,6 +2,7 @@ import { and, asc, count, eq, gt, or, sql } from "drizzle-orm";
 import { db, type Executor, type Tx } from "../db/index.ts";
 import { columns, tasks, type ColumnRow } from "../db/schema.ts";
 import { isUuid } from "../lib/crypto.ts";
+import { columnNameKey } from "../lib/columnNames.ts";
 import { ApiError, badRequest, conflict, notFound } from "../lib/errors.ts";
 import { computePosition, initialPositions, type Placement } from "../lib/position.ts";
 import { actorOf, type Principal } from "../lib/principal.ts";
@@ -23,14 +24,20 @@ export async function resolveColumn(ex: Executor, boardId: string, idOrName: str
   const needle = idOrName.trim();
   const byId = isUuid(needle) ? cols.find((c) => c.id === needle.toLowerCase()) : undefined;
   if (byId) return byId;
-  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
-  const byName = cols.filter((c) => norm(c.name) === norm(needle));
+  const byName = cols.filter((c) => columnNameKey(c.name) === columnNameKey(needle));
   if (byName.length === 1) return byName[0]!;
   if (byName.length > 1) throw conflict(`Multiple columns named "${needle}" on this board; use the column id`);
   throw new ApiError(
     "not_found",
     `Column "${needle}" not found on this board. Available columns: ${cols.map((c) => `"${c.name}"`).join(", ")}`,
   );
+}
+
+/** One rule for every column entering a board: its name may not match a sibling's, in any case. */
+function assertNameFree(siblings: readonly ColumnRow[], name: string): void {
+  const key = columnNameKey(name);
+  const clash = siblings.find((c) => columnNameKey(c.name) === key);
+  if (clash) throw conflict(`A column named "${clash.name}" already exists on this board; column names are unique`);
 }
 
 export async function createColumn(
@@ -43,6 +50,7 @@ export async function createColumn(
   return mutate(board.workspaceId, actorOf(p), async (tx, emit) => {
     await lockedBoard(tx, boardId);
     const siblings = await boardColumns(tx, boardId);
+    assertNameFree(siblings, input.name);
     const after = input.after ? await resolveColumn(tx, boardId, input.after) : undefined;
     const position = computePosition(siblings, { afterId: after?.id });
     const [col] = await tx
@@ -69,7 +77,9 @@ export async function updateColumn(
   return mutate(workspaceId, actorOf(p), async (tx, emit) => {
     const col = await currentColumn(tx, columnId);
     const reposition = Boolean(patch.beforeId || patch.afterId);
-    const position = reposition ? computePosition(await boardColumns(tx, col.boardId), patch, col.id) : col.position;
+    const siblings = await boardColumns(tx, col.boardId);
+    if (patch.name !== undefined) assertNameFree(siblings.filter((c) => c.id !== col.id), patch.name);
+    const position = reposition ? computePosition(siblings, patch, col.id) : col.position;
     const [updated] = await tx
       .update(columns)
       .set({

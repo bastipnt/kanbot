@@ -249,6 +249,14 @@ describe("mcp", () => {
     // Rejected by the tool's input schema (SDK validation error, not the contract error JSON).
     const bad = await client.callTool({ name: "import_board", arguments: { ...exported.data, version: 2 } });
     expect(bad.isError).toBe(true);
+
+    // The array refinement applies here too: the SDK parses the raw shape, so duplicates never reach the service.
+    const dup = await client.callTool({
+      name: "import_board",
+      arguments: { ...exported.data, board: { name: "Dup" }, columns: [{ name: "Done" }, { name: " done " }] },
+    });
+    expect(dup.isError).toBe(true);
+    expect(((dup.content as { text?: string }[])[0] ?? {}).text).toContain('Duplicate column names: "done"');
     await client.close();
   });
 

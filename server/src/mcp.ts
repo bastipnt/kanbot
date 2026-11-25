@@ -7,6 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { columnNameKey } from "./lib/columnNames.ts";
 import { ApiError, errorBody } from "./lib/errors.ts";
 import { bearerToken } from "./lib/http.ts";
 import type { Principal } from "./lib/principal.ts";
@@ -356,7 +357,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
           .array(s.name)
           .min(1)
           .max(50)
-          .refine((l) => new Set(l.map((n) => n.toLowerCase())).size === l.length, "Column names must be unique")
+          .refine((l) => new Set(l.map(columnNameKey)).size === l.length, "Column names must be unique")
           .optional()
           .describe("Column names, left to right. Omit for the default set."),
       },

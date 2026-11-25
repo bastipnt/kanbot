@@ -192,7 +192,7 @@ export async function listColumnTasks(
   const page = rows.slice(0, opts.limit);
   return {
     column: toColumn(col),
-    tasks: page.map(toTask),
+    tasks: page.map((t) => toTask(t, board.name)),
     nextCursor: rows.length > opts.limit ? encodeCursor(page[page.length - 1]!) : null,
   };
 }

@@ -15,6 +15,13 @@
       "when": 1790804475772,
       "tag": "0001_signup_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795622318957,
+      "tag": "0002_task_numbers",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import type {
   UserRow,
   WorkspaceRow,
 } from "../db/schema.ts";
+import { taskHandle } from "./boardKey.ts";
 import type { Actor } from "./principal.ts";
 
 const iso = (d: Date) => d.toISOString();
@@ -53,8 +54,9 @@ export const toColumn = (c: ColumnRow) => ({
 });
 export type Column = ReturnType<typeof toColumn>;
 
-export const toTask = (t: TaskRow) => ({
+export const toTask = (t: TaskRow, boardName: string) => ({
   id: t.id,
+  handle: taskHandle(boardName, t.number),
   boardId: t.boardId,
   columnId: t.columnId,
   title: t.title,

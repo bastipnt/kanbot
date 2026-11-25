@@ -10,7 +10,7 @@ import { toBoard, toColumn, toComment, toTask, type Board } from "../lib/seriali
 import { authorize, loadBoard } from "./access.ts";
 import { boardColumns } from "./columns.ts";
 import { chunks, INSERT_CHUNK, mutate } from "./events.ts";
-import { cleanLabels } from "./tasks.ts";
+import { cleanLabels, reserveTaskNumbers } from "./tasks.ts";
 
 export const MAX_IMPORT_TASKS = 10_000;
 
@@ -47,7 +47,7 @@ export async function exportBoard(p: Principal, boardId: string): Promise<BoardE
       tasks: taskRows
         .filter((r) => r.task.columnId === col.id)
         .map(({ task: row, assigneeName, assigneeEmail }) => {
-          const t = toTask(row);
+          const t = toTask(row, board.name);
           return {
             title: t.title,
             description: t.description,
@@ -99,6 +99,9 @@ export async function importBoard(p: Principal, workspaceId: string, file: Board
 
     const taskRows: (typeof tasks.$inferInsert)[] = [];
     const commentRows: (typeof comments.$inferInsert)[] = [];
+    // A fresh board, so one reservation numbers every imported task 1..n in file order.
+    const firstNumber = taskCount > 0 ? await reserveTaskNumbers(tx, board!.id, taskCount) : 1;
+    let nextNumber = firstNumber;
     file.columns.forEach((c, ci) => {
       const list = c.tasks ?? [];
       const positions = initialPositions(list.length);
@@ -108,6 +111,7 @@ export async function importBoard(p: Principal, workspaceId: string, file: Board
           id,
           boardId: board!.id,
           columnId: colRows[ci]!.id,
+          number: nextNumber++,
           title: t.title.trim(),
           description: t.description ?? "",
           position: positions[ti]!,
@@ -134,7 +138,7 @@ export async function importBoard(p: Principal, workspaceId: string, file: Board
 
     for (const chunk of chunks(taskRows, INSERT_CHUNK)) {
       for (const task of await tx.insert(tasks).values(chunk).returning()) {
-        emit({ type: "task.created", entityId: task.id, payload: toTask(task) });
+        emit({ type: "task.created", entityId: task.id, payload: toTask(task, board!.name) });
       }
     }
     for (const chunk of chunks(commentRows, INSERT_CHUNK)) {

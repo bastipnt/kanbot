@@ -78,10 +78,10 @@ export async function loadTask(
   p: Principal,
   taskId: string,
   ex: Executor = db,
-): Promise<{ task: TaskRow; workspaceId: string }> {
+): Promise<{ task: TaskRow; workspaceId: string; boardName: string }> {
   if (!isUuid(taskId)) throw notFound("Task");
   const [row] = await ex
-    .select({ task: tasks, workspaceId: boards.workspaceId })
+    .select({ task: tasks, workspaceId: boards.workspaceId, boardName: boards.name })
     .from(tasks)
     .innerJoin(boards, eq(boards.id, tasks.boardId))
     .where(eq(tasks.id, taskId));

@@ -121,6 +121,8 @@ export const boards = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /** Last task number minted on this board; never decreases, so a handle is not reused. */
+    taskSeq: bigint("task_seq", { mode: "number" }).notNull().default(0),
     createdAt: createdAt(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },
@@ -152,6 +154,8 @@ export const tasks = pgTable(
     columnId: uuid("column_id")
       .notNull()
       .references(() => columns.id),
+    /** Per-board sequence number; `toTask` renders it as the handle, prefixed with the board key. */
+    number: integer("number").notNull(),
     title: text("title").notNull(),
     description: text("description").notNull().default(""),
     position: position(),
@@ -164,7 +168,11 @@ export const tasks = pgTable(
     createdAt: createdAt(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },
-  (t) => [index("tasks_column_idx").on(t.columnId, t.position), index("tasks_board_idx").on(t.boardId)],
+  (t) => [
+    index("tasks_column_idx").on(t.columnId, t.position),
+    index("tasks_board_idx").on(t.boardId),
+    uniqueIndex("tasks_board_number_idx").on(t.boardId, t.number),
+  ],
 );
 
 export const comments = pgTable(

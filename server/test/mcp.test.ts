@@ -103,6 +103,7 @@ describe("mcp", () => {
 
     const byId = await call(client, "list_tasks", { column: col("Backlog").id });
     expect(byId.data.tasks.map((t: any) => t.title)).toEqual(["x"]);
+    expect(byId.data.tasks[0].handle).toBe("B-6");
     expect(byId.data.nextCursor).toBeNull();
     const bad = await call(client, "list_tasks", { column: "nope" });
     expect(bad.isError).toBe(true);
@@ -174,6 +175,7 @@ describe("mcp", () => {
 
     const created = await call(client, "create_task", { title: "Agent task", column: "In Progress", labels: ["ai"] });
     expect(created.isError).toBe(false);
+    expect(created.data.handle).toBe("B-1");
     expect(created.data.createdBy.type).toBe("agent");
 
     const defaultCol = await call(client, "create_task", { board: "board", title: "Goes to backlog" });

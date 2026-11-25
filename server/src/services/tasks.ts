@@ -47,6 +47,20 @@ async function currentTask(tx: Tx, taskId: string): Promise<TaskRow> {
 }
 
 /**
+ * Reserve `count` consecutive numbers on a board and return the first. `mutate` already locks the
+ * workspace row, so the counter bump cannot race; the numbers are never handed out twice.
+ */
+export async function reserveTaskNumbers(tx: Tx, boardId: string, count = 1): Promise<number> {
+  const [row] = await tx
+    .update(boards)
+    .set({ taskSeq: sql`${boards.taskSeq} + ${count}` })
+    .where(eq(boards.id, boardId))
+    .returning({ last: boards.taskSeq });
+  if (!row) throw notFound("Board");
+  return row.last - count + 1;
+}
+
+/**
  * Creates a task at the end of the given column. `column` may be a column id or case-insensitive name;
  * when omitted the board's first column is used.
  */
@@ -58,16 +72,18 @@ export async function createTask(
   const board = await loadBoard(p, boardId);
   const actor = actorOf(p);
   return mutate(board.workspaceId, actor, async (tx, emit) => {
-    await lockedBoard(tx, boardId);
+    const locked = await lockedBoard(tx, boardId);
     const col = input.column ? await resolveColumn(tx, boardId, input.column) : (await boardColumns(tx, boardId))[0];
     if (!col) throw badRequest("Board has no columns");
     await assertAssignable(tx, board.workspaceId, input.assigneeId);
     const position = computePosition(await columnTasks(tx, col.id));
+    const number = await reserveTaskNumbers(tx, boardId);
     const [task] = await tx
       .insert(tasks)
       .values({
         boardId,
         columnId: col.id,
+        number,
         title: input.title.trim(),
         description: input.description ?? "",
         position,
@@ -79,8 +95,8 @@ export async function createTask(
         createdByName: actor.name,
       })
       .returning();
-    emit({ type: "task.created", entityId: task!.id, payload: toTask(task!) });
-    return toTask(task!);
+    emit({ type: "task.created", entityId: task!.id, payload: toTask(task!, locked.name) });
+    return toTask(task!, locked.name);
   });
 }
 
@@ -101,7 +117,7 @@ export interface TaskReadOptions {
 }
 
 export async function getTask(p: Principal, taskId: string, opts: TaskReadOptions = {}): Promise<TaskDetail> {
-  const { task, workspaceId } = await loadTask(p, taskId);
+  const { task, workspaceId, boardName } = await loadTask(p, taskId);
   const [counted] = await db.select({ n: count() }).from(comments).where(eq(comments.taskId, taskId));
   const paged = opts.comments;
   let before: SQL | undefined;
@@ -119,7 +135,7 @@ export async function getTask(p: Principal, taskId: string, opts: TaskReadOption
     .orderBy(...(paged ? [desc(comments.createdAt), desc(comments.id)] : [asc(comments.createdAt), asc(comments.id)]));
   const rows = paged ? await query.limit(paged.limit + 1) : await query;
   const page = paged ? rows.slice(0, paged.limit) : rows;
-  const { description, ...brief } = toTask(task);
+  const { description, ...brief } = toTask(task, boardName);
   const references = await resolveReferences(
     workspaceId,
     [...(opts.includeDescription === false ? [] : [description]), ...page.map((c) => c.body)],
@@ -135,7 +151,7 @@ export async function getTask(p: Principal, taskId: string, opts: TaskReadOption
 }
 
 export async function updateTask(p: Principal, taskId: string, patch: TaskFields): Promise<Task> {
-  const { workspaceId } = await loadTask(p, taskId);
+  const { workspaceId, boardName } = await loadTask(p, taskId);
   return mutate(workspaceId, actorOf(p), async (tx, emit) => {
     await currentTask(tx, taskId);
     if (patch.assigneeId !== undefined) await assertAssignable(tx, workspaceId, patch.assigneeId);
@@ -151,8 +167,8 @@ export async function updateTask(p: Principal, taskId: string, patch: TaskFields
       })
       .where(eq(tasks.id, taskId))
       .returning();
-    emit({ type: "task.updated", entityId: taskId, payload: toTask(updated!) });
-    return toTask(updated!);
+    emit({ type: "task.updated", entityId: taskId, payload: toTask(updated!, boardName) });
+    return toTask(updated!, boardName);
   });
 }
 
@@ -164,7 +180,7 @@ const textArray = (xs: string[]) => sql`ARRAY[${sql.join(xs.map((x) => sql`${x}`
  * and none is lost. Existing labels keep their order; added ones go last, already-present ones are skipped.
  */
 export async function changeLabels(p: Principal, taskId: string, op: "add" | "remove", input: string[]): Promise<Task> {
-  const { workspaceId } = await loadTask(p, taskId);
+  const { workspaceId, boardName } = await loadTask(p, taskId);
   const given = cleanLabels(input);
   return mutate(workspaceId, actorOf(p), async (tx, emit) => {
     const arr = textArray(given);
@@ -179,8 +195,8 @@ export async function changeLabels(p: Principal, taskId: string, op: "add" | "re
       .returning();
     if (!updated) throw notFound("Task");
     if (updated.labels.length > MAX_LABELS) throw badRequest(`A task can have at most ${MAX_LABELS} labels`);
-    emit({ type: "task.updated", entityId: taskId, payload: toTask(updated) });
-    return toTask(updated);
+    emit({ type: "task.updated", entityId: taskId, payload: toTask(updated, boardName) });
+    return toTask(updated, boardName);
   });
 }
 
@@ -189,7 +205,7 @@ export async function changeLabels(p: Principal, taskId: string, op: "add" | "re
  * Without beforeId/afterId the task goes to the end of the target column.
  */
 export async function moveTask(p: Principal, taskId: string, input: { column: string } & Placement): Promise<Task> {
-  const { workspaceId } = await loadTask(p, taskId);
+  const { workspaceId, boardName } = await loadTask(p, taskId);
   return mutate(workspaceId, actorOf(p), async (tx, emit) => {
     const task = await currentTask(tx, taskId);
     const col = await resolveColumn(tx, task.boardId, input.column);
@@ -199,8 +215,8 @@ export async function moveTask(p: Principal, taskId: string, input: { column: st
       .set({ columnId: col.id, position, updatedAt: new Date() })
       .where(eq(tasks.id, taskId))
       .returning();
-    emit({ type: "task.moved", entityId: taskId, payload: toTask(moved!) });
-    return toTask(moved!);
+    emit({ type: "task.moved", entityId: taskId, payload: toTask(moved!, boardName) });
+    return toTask(moved!, boardName);
   });
 }
 
@@ -284,11 +300,11 @@ export async function searchTasks(
     );
   }
   const rows = await db
-    .select({ task: tasks })
+    .select({ task: tasks, boardName: boards.name })
     .from(tasks)
     .innerJoin(boards, eq(boards.id, tasks.boardId))
     .where(and(...conds))
     .orderBy(desc(tasks.updatedAt))
     .limit(Math.min(opts.limit ?? 100, 500));
-  return rows.map((r) => toTask(r.task));
+  return rows.map((r) => toTask(r.task, r.boardName));
 }

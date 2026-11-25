@@ -80,7 +80,7 @@ export async function getBoard(p: Principal, boardId: string): Promise<BoardSnap
     db.select().from(columns).where(eq(columns.boardId, board.id)).orderBy(asc(columns.position), asc(columns.id)),
     db.select().from(tasks).where(eq(tasks.boardId, board.id)).orderBy(asc(tasks.position), asc(tasks.id)),
   ]);
-  return { board: toBoard(board), columns: cols.map(toColumn), tasks: taskRows.map(toTask) };
+  return { board: toBoard(board), columns: cols.map(toColumn), tasks: taskRows.map((t) => toTask(t, board.name)) };
 }
 
 /** Re-read a board inside a mutation transaction (it may have been deleted since the permission check). */

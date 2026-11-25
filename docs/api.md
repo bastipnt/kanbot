@@ -17,9 +17,9 @@ Workspace     { id, name, role /* owner|admin|member, of current user */, create
 Member        { userId, name, email, role, joinedAt }
 Board         { id, workspaceId, name, createdAt, updatedAt }
 Column        { id, boardId, name, position, wipLimit /* int|null */ }
-Task          { id, boardId, columnId, title, description /* markdown */, position,
-                assigneeId /* uuid|null */, labels /* string[] */, dueAt /* string|null */,
-                createdBy: Actor, createdAt, updatedAt }
+Task          { id, handle /* "KEY-n", see "Task handles" */, boardId, columnId, title,
+                description /* markdown */, position, assigneeId /* uuid|null */,
+                labels /* string[] */, dueAt /* string|null */, createdBy: Actor, createdAt, updatedAt }
 TaskReference { id, broken, title?, boardId?, boardName?, columnId?, columnName? } /* see "Task references" */
 Comment       { id, taskId, body /* markdown */, actor: Actor, createdAt }
 Actor         { type: "user"|"agent", id, name }
@@ -150,6 +150,13 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   order of first appearance, at most 100, the card itself left out. Only cards of the same workspace resolve. An
   unresolved `#task:<id>` (typo, deleted card, other workspace) gives `{id, broken: true}`; an unresolved bare UUID is
   omitted, as it may be a user, board or comment id. Typed relations (`blocks`, `parentOf`) are not part of v1.
+- **Task handles**: every task carries `handle` (`"KEY-n"`, e.g. `KAN-142`), so a card can be named without its UUID.
+  Numbers count up per board from 1, are minted on create, and stay with the task when it is edited or moved to another
+  column; a deleted task's number is never handed out again. `KEY` is derived from the board name on read: the first
+  letters of its words, uppercase, at most 3, `BRD` when the name yields none. A rename therefore changes every prefix
+  on it (`Kanban Board` → `KB-1`) and leaves the numbers alone. Handles appear in every `Task` payload (REST, MCP,
+  `task.*` events) but are not accepted as input: endpoints still take ids. `BoardExport` carries no number; an
+  imported board numbers its tasks from 1 in file order.
 - **Events**: `limit` defaults to 500 (max 1000). If a page has `limit` events, page again with `since` = last seq.
   Creating a workspace records `member.added` for the owner (seq 1). `member.added` payload is a `Member`;
   `member.removed` payload is `{id: userId}`; for member events `entityId` = userId. Deleting a board emits only
@@ -181,8 +188,10 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   cleared. `createdAt` of tasks and comments is kept; tasks and comments are attributed to the importing actor
   (attribution in a file can't be verified), and a comment whose original author name differs from the importer's
   gets its body prefixed with `*Originally by <name>*` + blank line. Events: `board.created`, then `column.created`,
-  `task.created` and `comment.created` for every imported entity, all in one transaction. Limits: 200 columns,
-  10 000 tasks, 1 000 comments per task; field limits as for the regular endpoints. Import applies the **Column
+  `task.created` and `comment.created` for every imported entity, all in one transaction. Every imported task is
+  numbered afresh on the new board (see **Task handles**), so handles differ from the source board's. Limits:
+  200 columns, 10 000 tasks, 1 000 comments per task; field limits as for the regular endpoints. Import applies
+  the **Column
   names** rule: a file that repeats a column name in any case is rejected with `400` naming the duplicates. A board
   created before the rule can still hold such a repeat, so exporting it and importing that file fails until the
   duplicate is renamed. Unknown `format` or a `version` other than 1 → `400`.

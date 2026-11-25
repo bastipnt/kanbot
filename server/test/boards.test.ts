@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { db } from "../src/db/index.ts";
+import { tasks } from "../src/db/schema.ts";
 import { api, createTask, registerUser, setup } from "./helpers.ts";
 
 const titlesIn = (snap: any, columnId: string) =>
@@ -188,6 +190,77 @@ describe("boards, columns, tasks", () => {
     const res = await api("POST", `/tasks/${t.id}/move`, { token: user.token, body: { columnId: "ready for dev" } });
     expect(res.status).toBe(200);
     expect(res.body.columnId).toBe(col("Ready for Dev").id);
+  });
+});
+
+describe("task handles", () => {
+  test("a new task gets the next number of its board; another board starts at 1", async () => {
+    const { user, ws, board, col } = await setup();
+    const named = await api("POST", `/workspaces/${ws.id}/boards`, {
+      token: user.token,
+      body: { name: "Kanban Board" },
+    });
+    const cols = (await api("GET", `/boards/${named.body.id}`, { token: user.token })).body.columns;
+
+    const first = await createTask(user, named.body.id, cols[0].id, "one");
+    expect(first.handle).toBe("KB-1");
+    const second = await createTask(user, named.body.id, cols[1].id, "two");
+    expect(second.handle).toBe("KB-2");
+
+    const elsewhere = await createTask(user, board.id, col("Backlog").id, "elsewhere");
+    expect(elsewhere.handle).toBe("B-1");
+
+    // Concurrent creates serialize on the board counter: distinct, consecutive numbers.
+    const burst = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => createTask(user, named.body.id, cols[2].id, `burst ${i}`)),
+    );
+    expect(burst.map((t: any) => t.handle).sort()).toEqual(["KB-3", "KB-4", "KB-5", "KB-6", "KB-7"]);
+  });
+
+  test("moving keeps the handle, a rename changes the prefix, numbers are not reused", async () => {
+    const { user, board, col } = await setup();
+    const a = await createTask(user, board.id, col("Backlog").id, "A");
+    const b = await createTask(user, board.id, col("Backlog").id, "B");
+    expect([a.handle, b.handle]).toEqual(["B-1", "B-2"]);
+
+    const moved = await api("POST", `/tasks/${a.id}/move`, { token: user.token, body: { columnId: col("Done").id } });
+    expect(moved.body.handle).toBe("B-1");
+
+    await api("PATCH", `/boards/${board.id}`, { token: user.token, body: { name: "  home  lab " } });
+    const reread = async (id: string) => (await api("GET", `/tasks/${id}`, { token: user.token })).body.task;
+    expect((await reread(a.id)).handle).toBe("HL-1");
+    expect((await reread(b.id)).handle).toBe("HL-2");
+
+    // At most three initials, upper-cased; a name without letters falls back to BRD.
+    await api("PATCH", `/boards/${board.id}`, { token: user.token, body: { name: "one two three four" } });
+    expect((await reread(a.id)).handle).toBe("OTT-1");
+    await api("PATCH", `/boards/${board.id}`, { token: user.token, body: { name: "***" } });
+    expect((await reread(a.id)).handle).toBe("BRD-1");
+
+    // Deleting the newest task does not hand its number to the next one.
+    await api("DELETE", `/tasks/${b.id}`, { token: user.token });
+    const c = await createTask(user, board.id, col("Backlog").id, "C");
+    expect(c.handle).toBe("BRD-3");
+  });
+
+  test("a task number is unique within its board", async () => {
+    const { user, board, col } = await setup();
+    const t = await createTask(user, board.id, col("Backlog").id, "one");
+    const duplicate = () =>
+      db.insert(tasks).values({
+        id: Bun.randomUUIDv7(),
+        boardId: board.id,
+        columnId: t.columnId,
+        number: Number(t.handle.split("-").at(-1)),
+        title: "duplicate",
+        position: "zz",
+        createdByType: "user",
+        createdById: t.createdBy.id,
+        createdByName: t.createdBy.name,
+      });
+    const failure = await duplicate().catch((e: any) => e);
+    // Unique violation: the (board_id, number) index rejects a hand-written repeat.
+    expect(failure?.cause?.code ?? failure?.code).toBe("23505");
   });
 });
 

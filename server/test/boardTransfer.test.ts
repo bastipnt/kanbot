@@ -117,6 +117,22 @@ describe("board export/import", () => {
     expect(events.every((e: any) => e.actor.id === user.id)).toBe(true);
   });
 
+  test("an imported board numbers its tasks from 1 in file order", async () => {
+    const { user, board } = await populatedBoard();
+    const file = (await api("GET", `/boards/${board.id}/export`, { token: user.token })).body;
+    const imported = await api("POST", `/workspaces/${board.workspaceId}/boards/import`, {
+      token: user.token,
+      body: file,
+    });
+    const copy = (await api("GET", `/boards/${imported.body.id}`, { token: user.token })).body;
+
+    // "Board" -> B; the file's order is columns left to right, tasks in board order within a column.
+    const byTitle = Object.fromEntries(copy.tasks.map((t: any) => [t.title, t.handle]));
+    expect(byTitle).toEqual({ B: "B-1", A: "B-2", "Ship it": "B-3" });
+    const next = await createTask(user, imported.body.id, copy.columns[0].id, "after import");
+    expect(next.handle).toBe("B-4");
+  });
+
   test("import elsewhere drops assignees who are not members and attributes to the importer", async () => {
     const { user, board } = await populatedBoard();
     const file = (await api("GET", `/boards/${board.id}/export`, { token: user.token })).body;

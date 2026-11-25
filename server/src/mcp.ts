@@ -39,6 +39,7 @@ async function run(fn: () => Promise<unknown>): Promise<CallToolResult> {
 /** Compact task shape for tool output. */
 const brief = (t: Task) => ({
   id: t.id,
+  handle: t.handle,
   title: t.title,
   columnId: t.columnId,
   assigneeId: t.assigneeId,

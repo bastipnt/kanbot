@@ -1,4 +1,5 @@
 import type { Event } from "../lib/serialize.ts";
+import { recordEventPublished } from "../metrics.ts";
 
 export interface Subscriber {
   /** Set for user connections so they can be dropped when the user leaves the workspace. */
@@ -25,6 +26,7 @@ class Hub {
 
   /** Must only be called after the transaction that wrote the event has committed. */
   publish(event: Event): void {
+    recordEventPublished(event.type, event.actor.type);
     for (const sub of this.subs.get(event.workspaceId) ?? []) {
       try {
         sub.onEvent(event);

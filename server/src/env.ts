@@ -30,6 +30,10 @@ export const env = {
   jwtSecret: validateJwtSecret(required("JWT_SECRET", isProd ? undefined : "dev-insecure-jwt-secret"), isProd),
   publicUrl: (process.env.PUBLIC_URL ?? "http://localhost:8787").replace(/\/+$/, ""),
   port: Number(process.env.PORT ?? 8787),
+  /** Prometheus listener, separate from `port`: the public proxy must not reach `/metrics`. */
+  metricsPort: Number(process.env.METRICS_PORT ?? 8788),
+  /** Image tag, set by the deploy; only used as a metric label. */
+  version: process.env.APP_VERSION ?? "dev",
   /** When true, POST /auth/register requires a signup invite (`bun run invite:create`). */
   registrationDisabled: ["1", "true", "yes"].includes((process.env.REGISTRATION_DISABLED ?? "").trim().toLowerCase()),
 };

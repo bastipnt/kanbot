@@ -12,8 +12,11 @@ services:
     environment:
       DATABASE_URL: postgres://kanbot:${POSTGRES_PASSWORD}@kanbot_db:5432/kanbot
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      PUBLIC_URL: https://${PUBLIC_HOSTNAME}
+      PUBLIC_URL: ${PUBLIC_URL:-https://${PUBLIC_HOSTNAME}}
       PORT: "8787"
+      # Prometheus scrapes this listener over kanbot_metrics_network; Caddy only forwards PORT.
+      METRICS_PORT: "8788"
+      APP_VERSION: ${IMAGE_TAG:-dev}
       # New accounts need a signup invite: see README "Invite users".
       REGISTRATION_DISABLED: ${REGISTRATION_DISABLED:-true}
     healthcheck:
@@ -31,8 +34,11 @@ services:
       kanbot_db:
         condition: service_healthy
     networks:
-      - caddy_network
-      - kanbot_network
+      caddy_network:
+      kanbot_network:
+      # External, shared with the host's Prometheus (alias kanbot-server).
+      kanbot_metrics_network:
+        aliases: [kanbot-server]
     restart: unless-stopped
 
   kanbot_db:
@@ -54,6 +60,8 @@ services:
 
 networks:
   caddy_network:
+    external: true
+  kanbot_metrics_network:
     external: true
   kanbot_network:
 

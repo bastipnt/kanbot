@@ -7,6 +7,7 @@ import { randomToken, sha256 } from "../lib/crypto.ts";
 import { conflict, forbidden, unauthorized } from "../lib/errors.ts";
 import type { Principal } from "../lib/principal.ts";
 import { toUser, type User } from "../lib/serialize.ts";
+import { recordAuthFailure } from "../metrics.ts";
 
 export const ACCESS_TOKEN_TTL_S = 15 * 60;
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -63,6 +64,7 @@ export async function register(input: {
 }): Promise<{ user: User } & Tokens> {
   const email = normalizeEmail(input.email);
   if (env.registrationDisabled && !input.inviteToken) {
+    recordAuthFailure("registration_disabled");
     throw forbidden("Registration is disabled; an invite is required");
   }
   const passwordHash = await Bun.password.hash(input.password, { algorithm: "argon2id" });
@@ -81,7 +83,10 @@ export async function register(input: {
           ),
         )
         .returning({ id: signupInvites.id });
-      if (!invite) throw forbidden("Invalid or expired invite");
+      if (!invite) {
+        recordAuthFailure("invite_invalid");
+        throw forbidden("Invalid or expired invite");
+      }
       inviteId = invite.id;
     }
     const [row] = await tx
@@ -89,7 +94,10 @@ export async function register(input: {
       .values({ email, name: input.name.trim(), passwordHash })
       .onConflictDoNothing()
       .returning();
-    if (!row) throw conflict("An account with this email already exists");
+    if (!row) {
+      recordAuthFailure("email_taken");
+      throw conflict("An account with this email already exists");
+    }
     if (inviteId) await tx.update(signupInvites).set({ usedBy: row.id }).where(eq(signupInvites.id, inviteId));
     return row;
   });
@@ -105,7 +113,10 @@ export async function login(input: { email: string; password: string }): Promise
   const ok = user
     ? await Bun.password.verify(input.password, user.passwordHash)
     : (await Bun.password.hash(input.password, { algorithm: "argon2id" }), false);
-  if (!user || !ok) throw unauthorized("Invalid email or password");
+  if (!user || !ok) {
+    recordAuthFailure("invalid_credentials");
+    throw unauthorized("Invalid email or password");
+  }
   return { user: toUser(user), ...(await issueTokens(user.id)) };
 }
 
@@ -116,7 +127,10 @@ export async function refresh(refreshToken: string): Promise<Tokens> {
       .delete(refreshTokens)
       .where(and(eq(refreshTokens.tokenHash, sha256(refreshToken)), gt(refreshTokens.expiresAt, new Date())))
       .returning();
-    if (!row) throw unauthorized("Invalid or expired refresh token");
+    if (!row) {
+      recordAuthFailure("invalid_refresh_token");
+      throw unauthorized("Invalid or expired refresh token");
+    }
     // Opportunistic cleanup of this user's expired tokens.
     await tx.delete(refreshTokens).where(and(eq(refreshTokens.userId, row.userId), lt(refreshTokens.expiresAt, new Date())));
     return { accessToken: await issueAccessToken(row.userId), refreshToken: await issueRefreshToken(row.userId, tx) };

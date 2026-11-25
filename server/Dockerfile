@@ -9,6 +9,6 @@ COPY drizzle ./drizzle
 COPY src ./src
 
 ENV NODE_ENV=production
-EXPOSE 8787
+EXPOSE 8787 8788
 USER bun
 CMD ["sh", "-c", "bun run db:migrate && bun run start"]

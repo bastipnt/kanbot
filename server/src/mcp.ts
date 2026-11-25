@@ -13,6 +13,7 @@ import { bearerToken } from "./lib/http.ts";
 import type { Principal } from "./lib/principal.ts";
 import * as s from "./lib/schemas.ts";
 import type { Task } from "./lib/serialize.ts";
+import { recordMcpCall } from "./metrics.ts";
 import { authenticate } from "./services/auth.ts";
 import * as boards from "./services/boards.ts";
 import * as transfer from "./services/boardTransfer.ts";
@@ -25,13 +26,18 @@ type AgentPrincipal = Extract<Principal, { kind: "agent" }>;
 const json = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
 
 /** Run a tool body; domain errors become tool errors (isError) with the contract's error JSON. */
-async function run(fn: () => Promise<unknown>): Promise<CallToolResult> {
+async function run(tool: string, fn: () => Promise<unknown>): Promise<CallToolResult> {
+  const start = performance.now();
   try {
-    return json(await fn());
+    const result = json(await fn());
+    recordMcpCall(tool, "ok", performance.now() - start);
+    return result;
   } catch (err) {
     if (err instanceof ApiError) {
+      recordMcpCall(tool, "error", performance.now() - start);
       return { isError: true, content: [{ type: "text", text: JSON.stringify(errorBody(err.code, err.message)) }] };
     }
+    recordMcpCall(tool, "internal", performance.now() - start);
     throw err;
   }
 }
@@ -75,7 +81,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
-    () => run(async () => (await boards.listBoards(p, workspaceId)).map((b) => ({ id: b.id, name: b.name }))),
+    () => run("list_boards", async () => (await boards.listBoards(p, workspaceId)).map((b) => ({ id: b.id, name: b.name }))),
   );
 
   server.registerTool(
@@ -93,7 +99,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       annotations: { readOnlyHint: true },
     },
     ({ board, includeTasks }) =>
-      run(async () => {
+      run("get_board", async () => {
         const b = await boards.findBoard(p, workspaceId, board);
         if (!includeTasks) {
           const sum = await columns.boardSummary(p, b.id);
@@ -129,7 +135,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       annotations: { readOnlyHint: true },
     },
     ({ board, column, limit, cursor }) =>
-      run(async () => {
+      run("list_tasks", async () => {
         const b = await boards.findBoard(p, workspaceId, board);
         const page = await columns.listColumnTasks(p, b.id, column, { limit: limit ?? 50, cursor });
         return {
@@ -155,7 +161,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       annotations: { readOnlyHint: true },
     },
     ({ query, board, limit }) =>
-      run(async () => {
+      run("search_tasks", async () => {
         const boardId = board ? (await boards.findBoard(p, workspaceId, board)).id : undefined;
         return (await tasks.searchTasks(p, workspaceId, query, { boardId, limit: limit ?? 25 })).map((t) => ({
           ...brief(t),
@@ -186,7 +192,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       },
       annotations: { readOnlyHint: true },
     },
-    ({ taskId, comments, includeDescription }) => run(() => tasks.getTask(p, taskId, { comments, includeDescription })),
+    ({ taskId, comments, includeDescription }) => run("get_task", () => tasks.getTask(p, taskId, { comments, includeDescription })),
   );
 
   server.registerTool(
@@ -204,7 +210,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       },
     },
     ({ board, ...input }) =>
-      run(async () => {
+      run("create_task", async () => {
         const b = await boards.findBoard(p, workspaceId, board);
         return tasks.createTask(p, b.id, input);
       }),
@@ -224,7 +230,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       },
       annotations: { idempotentHint: true },
     },
-    ({ taskId, ...patch }) => run(() => tasks.updateTask(p, taskId, patch)),
+    ({ taskId, ...patch }) => run("update_task", () => tasks.updateTask(p, taskId, patch)),
   );
 
   server.registerTool(
@@ -237,7 +243,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       inputSchema: { taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."), labels: s.labelDelta.describe("Labels to add.") },
       annotations: { idempotentHint: true },
     },
-    ({ taskId, labels }) => run(() => tasks.changeLabels(p, taskId, "add", labels)),
+    ({ taskId, labels }) => run("add_labels", () => tasks.changeLabels(p, taskId, "add", labels)),
   );
 
   server.registerTool(
@@ -250,7 +256,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       inputSchema: { taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."), labels: s.labelDelta.describe("Labels to remove.") },
       annotations: { idempotentHint: true },
     },
-    ({ taskId, labels }) => run(() => tasks.changeLabels(p, taskId, "remove", labels)),
+    ({ taskId, labels }) => run("remove_labels", () => tasks.changeLabels(p, taskId, "remove", labels)),
   );
 
   server.registerTool(
@@ -269,7 +275,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       },
       annotations: { idempotentHint: true },
     },
-    ({ taskId, set, unset }) => run(() => tasks.changeMetadata(p, taskId, { set, unset })),
+    ({ taskId, set, unset }) => run("set_task_metadata", () => tasks.changeMetadata(p, taskId, { set, unset })),
   );
 
   server.registerTool(
@@ -287,7 +293,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       },
     },
     ({ taskId, column, beforeTaskId, afterTaskId }) =>
-      run(() => tasks.moveTask(p, taskId, { column, beforeId: beforeTaskId, afterId: afterTaskId })),
+      run("move_task", () => tasks.moveTask(p, taskId, { column, beforeId: beforeTaskId, afterId: afterTaskId })),
   );
 
   server.registerTool(
@@ -305,7 +311,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       },
       annotations: { idempotentHint: true },
     },
-    ({ taskId, assignee }) => run(() => tasks.assignTask(p, taskId, assignee)),
+    ({ taskId, assignee }) => run("assign_task", () => tasks.assignTask(p, taskId, assignee)),
   );
 
   server.registerTool(
@@ -315,7 +321,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       description: "Add a markdown comment to a task (e.g. a progress note or question).",
       inputSchema: { taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."), body: s.commentBody.describe("Markdown comment body.") },
     },
-    ({ taskId, body }) => run(() => tasks.addComment(p, taskId, body)),
+    ({ taskId, body }) => run("add_comment", () => tasks.addComment(p, taskId, body)),
   );
 
   server.registerTool(
@@ -331,7 +337,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       },
     },
     ({ board, name, afterColumn, wipLimit }) =>
-      run(async () => {
+      run("create_column", async () => {
         const b = await boards.findBoard(p, workspaceId, board);
         return columns.createColumn(p, b.id, { name, after: afterColumn, wipLimit });
       }),
@@ -349,7 +355,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       annotations: { idempotentHint: true },
     },
     ({ board, columns: order }) =>
-      run(async () => {
+      run("reorder_columns", async () => {
         const b = await boards.findBoard(p, workspaceId, board);
         return (await columns.reorderColumns(p, b.id, order)).map((c) => ({ id: c.id, name: c.name }));
       }),
@@ -363,7 +369,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
-    () => run(() => workspaces.listMembers(p, workspaceId)),
+    () => run("list_members", () => workspaces.listMembers(p, workspaceId)),
   );
 
   server.registerTool(
@@ -385,7 +391,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       },
     },
     ({ name, columns: names }) =>
-      run(async () => {
+      run("create_board", async () => {
         const { board, columns: cols } = await boards.createBoardWithColumns(p, workspaceId, name, names);
         return { id: board.id, name: board.name, columns: cols.map((c) => ({ id: c.id, name: c.name })) };
       }),
@@ -402,7 +408,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       annotations: { readOnlyHint: true },
     },
     ({ board }) =>
-      run(async () => {
+      run("export_board", async () => {
         const b = await boards.findBoard(p, workspaceId, board);
         return transfer.exportBoard(p, b.id);
       }),
@@ -418,7 +424,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       inputSchema: s.boardExport.shape,
     },
     (file) =>
-      run(async () => {
+      run("import_board", async () => {
         const b = await transfer.importBoard(p, workspaceId, file);
         return { id: b.id, name: b.name };
       }),

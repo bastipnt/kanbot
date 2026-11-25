@@ -7,6 +7,7 @@ import type { Server, ServerWebSocket, WebSocketHandler } from "bun";
 import { ApiError, errorBody, unauthorized } from "../lib/errors.ts";
 import { bearerToken } from "../lib/http.ts";
 import type { Event } from "../lib/serialize.ts";
+import { wsConnectionClosed, wsConnectionOpened } from "../metrics.ts";
 import { authorize } from "../services/access.ts";
 import { authenticate } from "../services/auth.ts";
 import { latestSeq } from "../services/events.ts";
@@ -49,6 +50,7 @@ export async function upgradeWebSocket(req: Request, server: Server<WsData>): Pr
 
 export const websocketHandler: WebSocketHandler<WsData> = {
   async open(ws) {
+    wsConnectionOpened();
     // Subscribe before reading latestSeq so nothing committed in between is lost; events that
     // arrive before `hello` are buffered and only those newer than latestSeq are forwarded.
     ws.data.unsubscribe = hub.subscribe(ws.data.workspaceId, {
@@ -82,6 +84,7 @@ export const websocketHandler: WebSocketHandler<WsData> = {
     if (msg && typeof msg === "object" && (msg as { kind?: unknown }).kind === "ping") send(ws, { kind: "pong" });
   },
   close(ws) {
+    wsConnectionClosed();
     ws.data.unsubscribe?.();
   },
 };

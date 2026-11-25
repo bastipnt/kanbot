@@ -3,6 +3,7 @@
 Kanban boards for humans and AI agents. Native macOS + iOS apps (SwiftUI), a self-hostable sync server (Bun + Postgres), and an MCP endpoint so agents like Claude can organize boards and act on tasks — e.g. move a task to *Ready for Dev*.
 
 - API contract: [docs/api.md](docs/api.md)
+- Monitoring: [docs/ops/monitoring.md](docs/ops/monitoring.md)
 - Server: [server/](server/)
 - Apps: [apps/](apps/)
 
@@ -62,10 +63,12 @@ Pushes to `main` that touch the server run `.github/workflows/deploy.yml`: serve
 runs `docker compose -f docker-compose.prod.yml up --wait` and rolls back to the previous image if the server doesn't
 become healthy. Migrations run when the server starts. It can also be started manually (*Run workflow*).
 
-The host needs Docker, a caddy-docker-proxy on the external `caddy_network`, and a DNS record for the hostname. One-time
-setup on the host:
+The host needs Docker, a caddy-docker-proxy on the external `caddy_network`, a DNS record for the hostname, and the
+external `kanbot_metrics_network` if the host runs the monitoring stack ([docs/ops/monitoring.md](docs/ops/monitoring.md)).
+One-time setup on the host:
 
 ```sh
+docker network create kanbot_metrics_network   # only needed with the monitoring stack
 mkdir -p ~/kanbot && cd ~/kanbot
 # copy .env.production.example from this repo to .env.production and fill it in
 chmod 600 .env.production

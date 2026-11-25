@@ -4,6 +4,8 @@ import { duplicateColumnNamesMessage } from "./columnNames.ts";
 
 export const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "must be a UUID");
 export const idParam = z.object({ id: uuid });
+/** A task reference: its id or `KEY-n` handle. Resolution is the service's (docs/api.md "Task handles"). */
+export const taskRef = z.string().trim().min(1).max(64);
 
 export const name = z.string().trim().min(1).max(200);
 export const title = z.string().trim().min(1).max(500);

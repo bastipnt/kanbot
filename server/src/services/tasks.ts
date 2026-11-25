@@ -1,6 +1,7 @@
-import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db, type Executor, type Tx } from "../db/index.ts";
 import { boards, comments, tasks, users, workspaceMembers, type TaskRow } from "../db/schema.ts";
+import { boardKey } from "../lib/boardKey.ts";
 import { isUuid } from "../lib/crypto.ts";
 import { ApiError, badRequest, conflict, notFound } from "../lib/errors.ts";
 import { computePosition, type Placement } from "../lib/position.ts";
@@ -22,6 +23,78 @@ export interface TaskFields {
 }
 
 export const cleanLabels = (labels: string[]) => [...new Set(labels.map((l) => l.trim()).filter(Boolean))];
+
+/** A task reference as clients may write it: the UUID or the task's `KEY-n` handle. */
+const HANDLE = /^([\p{L}\p{N}]{1,3})-([1-9]\d{0,8})$/u;
+
+export interface ResolvedTask {
+  task: TaskRow;
+  workspaceId: string;
+  boardName: string;
+}
+
+/** Workspaces whose handles `p` may resolve: its own for an API key, every membership for a user. */
+async function handleWorkspaces(p: Principal, ex: Executor): Promise<string[]> {
+  if (p.kind === "agent") return [p.apiKey.workspaceId];
+  const rows = await ex
+    .select({ id: workspaceMembers.workspaceId })
+    .from(workspaceMembers)
+    .where(eq(workspaceMembers.userId, p.user.id));
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Resolve a task id or handle to a task the principal may read. A handle names a number on a board,
+ * and boards sharing their initials share a key, so a handle that no card answers — or that several
+ * boards do — is `not_found`, the same error as an unknown UUID.
+ */
+export async function resolveTask(p: Principal, ref: string, ex: Executor = db): Promise<ResolvedTask> {
+  if (isUuid(ref)) return loadTask(p, ref, ex);
+  const match = HANDLE.exec(ref.trim());
+  if (!match) throw notFound("Task");
+  const key = match[1]!.toUpperCase();
+  const workspaceIds = await handleWorkspaces(p, ex);
+  if (workspaceIds.length === 0) throw notFound("Task");
+  const candidates = await ex
+    .select({ id: boards.id, name: boards.name })
+    .from(boards)
+    .where(inArray(boards.workspaceId, workspaceIds));
+  const boardIds = candidates.filter((b) => boardKey(b.name) === key).map((b) => b.id);
+  if (boardIds.length === 0) throw notFound("Task");
+  const rows = await ex
+    .select({ task: tasks, workspaceId: boards.workspaceId, boardName: boards.name })
+    .from(tasks)
+    .innerJoin(boards, eq(boards.id, tasks.boardId))
+    .where(and(inArray(tasks.boardId, boardIds), eq(tasks.number, Number(match[2]))));
+  if (rows.length !== 1) throw notFound("Task");
+  const row = rows[0]!;
+  await authorize(p, row.workspaceId, "member", ex);
+  return row;
+}
+
+/**
+ * Placement refs may be handles. A handle is board-local, so it only resolves against `boardId` and its
+ * key; a ref that resolves nowhere is passed on and fails `computePosition`'s sibling check as before.
+ */
+async function placementRefs(
+  ex: Executor,
+  boardId: string,
+  boardName: string,
+  placement: Placement,
+): Promise<Placement> {
+  const key = boardKey(boardName);
+  const resolve = async (ref: string | null | undefined) => {
+    if (!ref || isUuid(ref)) return ref;
+    const match = HANDLE.exec(ref.trim());
+    if (!match || match[1]!.toUpperCase() !== key) return ref;
+    const [row] = await ex
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.boardId, boardId), eq(tasks.number, Number(match[2]))));
+    return row?.id ?? ref;
+  };
+  return { beforeId: await resolve(placement.beforeId), afterId: await resolve(placement.afterId) };
+}
 
 async function assertAssignable(ex: Executor, workspaceId: string, userId: string | null | undefined) {
   if (!userId) return;
@@ -116,8 +189,9 @@ export interface TaskReadOptions {
   includeDescription?: boolean;
 }
 
-export async function getTask(p: Principal, taskId: string, opts: TaskReadOptions = {}): Promise<TaskDetail> {
-  const { task, workspaceId, boardName } = await loadTask(p, taskId);
+export async function getTask(p: Principal, taskRef: string, opts: TaskReadOptions = {}): Promise<TaskDetail> {
+  const { task, workspaceId, boardName } = await resolveTask(p, taskRef);
+  const taskId = task.id;
   const [counted] = await db.select({ n: count() }).from(comments).where(eq(comments.taskId, taskId));
   const paged = opts.comments;
   let before: SQL | undefined;
@@ -150,8 +224,9 @@ export async function getTask(p: Principal, taskId: string, opts: TaskReadOption
   };
 }
 
-export async function updateTask(p: Principal, taskId: string, patch: TaskFields): Promise<Task> {
-  const { workspaceId, boardName } = await loadTask(p, taskId);
+export async function updateTask(p: Principal, taskRef: string, patch: TaskFields): Promise<Task> {
+  const { task: found, workspaceId, boardName } = await resolveTask(p, taskRef);
+  const taskId = found.id;
   return mutate(workspaceId, actorOf(p), async (tx, emit) => {
     await currentTask(tx, taskId);
     if (patch.assigneeId !== undefined) await assertAssignable(tx, workspaceId, patch.assigneeId);
@@ -179,8 +254,9 @@ const textArray = (xs: string[]) => sql`ARRAY[${sql.join(xs.map((x) => sql`${x}`
  * Adds or removes labels with one UPDATE on the array column, so concurrent edits serialize on the row lock
  * and none is lost. Existing labels keep their order; added ones go last, already-present ones are skipped.
  */
-export async function changeLabels(p: Principal, taskId: string, op: "add" | "remove", input: string[]): Promise<Task> {
-  const { workspaceId, boardName } = await loadTask(p, taskId);
+export async function changeLabels(p: Principal, taskRef: string, op: "add" | "remove", input: string[]): Promise<Task> {
+  const { task: found, workspaceId, boardName } = await resolveTask(p, taskRef);
+  const taskId = found.id;
   const given = cleanLabels(input);
   return mutate(workspaceId, actorOf(p), async (tx, emit) => {
     const arr = textArray(given);
@@ -204,12 +280,14 @@ export async function changeLabels(p: Principal, taskId: string, op: "add" | "re
  * Move a task to a column (same board) and position. `column` is a column id or case-insensitive name.
  * Without beforeId/afterId the task goes to the end of the target column.
  */
-export async function moveTask(p: Principal, taskId: string, input: { column: string } & Placement): Promise<Task> {
-  const { workspaceId, boardName } = await loadTask(p, taskId);
+export async function moveTask(p: Principal, taskRef: string, input: { column: string } & Placement): Promise<Task> {
+  const { task: found, workspaceId, boardName } = await resolveTask(p, taskRef);
+  const taskId = found.id;
   return mutate(workspaceId, actorOf(p), async (tx, emit) => {
     const task = await currentTask(tx, taskId);
     const col = await resolveColumn(tx, task.boardId, input.column);
-    const position = computePosition(await columnTasks(tx, col.id), input, task.id);
+    const placement = await placementRefs(tx, task.boardId, boardName, input);
+    const position = computePosition(await columnTasks(tx, col.id), placement, task.id);
     const [moved] = await tx
       .update(tasks)
       .set({ columnId: col.id, position, updatedAt: new Date() })
@@ -220,8 +298,9 @@ export async function moveTask(p: Principal, taskId: string, input: { column: st
   });
 }
 
-export async function deleteTask(p: Principal, taskId: string): Promise<void> {
-  const { workspaceId } = await loadTask(p, taskId);
+export async function deleteTask(p: Principal, taskRef: string): Promise<void> {
+  const { task: found, workspaceId } = await resolveTask(p, taskRef);
+  const taskId = found.id;
   requireUser(p);
   await mutate(workspaceId, actorOf(p), async (tx, emit) => {
     const deleted = await tx.delete(tasks).where(eq(tasks.id, taskId)).returning({ id: tasks.id });
@@ -230,8 +309,9 @@ export async function deleteTask(p: Principal, taskId: string): Promise<void> {
   });
 }
 
-export async function addComment(p: Principal, taskId: string, body: string): Promise<Comment> {
-  const { workspaceId } = await loadTask(p, taskId);
+export async function addComment(p: Principal, taskRef: string, body: string): Promise<Comment> {
+  const { task: found, workspaceId } = await resolveTask(p, taskRef);
+  const taskId = found.id;
   const actor = actorOf(p);
   return mutate(workspaceId, actor, async (tx, emit) => {
     await currentTask(tx, taskId);
@@ -248,9 +328,9 @@ export async function addComment(p: Principal, taskId: string, body: string): Pr
  * Assign a task to a workspace member identified by id, email or (case-insensitive) name.
  * `null` unassigns.
  */
-export async function assignTask(p: Principal, taskId: string, assignee: string | null): Promise<Task> {
-  if (assignee === null) return updateTask(p, taskId, { assigneeId: null });
-  const { workspaceId } = await loadTask(p, taskId);
+export async function assignTask(p: Principal, taskRef: string, assignee: string | null): Promise<Task> {
+  if (assignee === null) return updateTask(p, taskRef, { assigneeId: null });
+  const { task: found, workspaceId } = await resolveTask(p, taskRef);
   const needle = assignee.trim().toLowerCase();
   const matches = await db
     .select({ id: users.id, name: users.name, email: users.email })
@@ -270,7 +350,7 @@ export async function assignTask(p: Principal, taskId: string, assignee: string 
   if (matches.length > 1) {
     throw conflict(`"${assignee}" matches several members (${matches.map((m) => m.email).join(", ")}); use an email`);
   }
-  return updateTask(p, taskId, { assigneeId: matches[0]!.id });
+  return updateTask(p, found.id, { assigneeId: matches[0]!.id });
 }
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);

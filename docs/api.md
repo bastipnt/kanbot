@@ -4,7 +4,7 @@ Single source of truth between `server/` and `apps/KanbotKit`. Change this file 
 
 ## Conventions
 - Base URL: `http://localhost:8787` in dev. All JSON, `camelCase` keys.
-- IDs: UUID v7 strings. Timestamps: ISO-8601 UTC strings (`2026-09-30T12:00:00.000Z`).
+- IDs: UUID v7 strings; a task id may be replaced by the card's handle (`KAN-142`, see "Task handles"). Timestamps: ISO-8601 UTC strings (`2026-09-30T12:00:00.000Z`).
 - Auth header: `Authorization: Bearer <accessToken>` (users) or `Bearer kb_<apiKey>` (agents; MCP + REST).
 - Errors: HTTP status + `{ "error": { "code": "not_found", "message": "..." } }`.
   Codes: `bad_request`, `unauthorized`, `forbidden`, `not_found`, `conflict`.
@@ -155,8 +155,17 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   column; a deleted task's number is never handed out again. `KEY` is derived from the board name on read: the first
   letters of its words, uppercase, at most 3, `BRD` when the name yields none. A rename therefore changes every prefix
   on it (`Kanban Board` → `KB-1`) and leaves the numbers alone. Handles appear in every `Task` payload (REST, MCP,
-  `task.*` events) but are not accepted as input: endpoints still take ids. `BoardExport` carries no number; an
-  imported board numbers its tasks from 1 in file order.
+  `task.*` events) and are accepted wherever a task id is: the path of `GET`/`PATCH`/`DELETE /tasks/:id`,
+  `/tasks/:id/labels/add`, `/labels/remove`, `/move`, `/comments`, and the `taskId` of `get_task`, `update_task`,
+  `add_labels`, `remove_labels`, `move_task`, `assign_task`, `add_comment`. Task placement ids (`beforeId`/`afterId` in
+  `POST /tasks/:id/move`, MCP `beforeTaskId`/`afterTaskId`) take a handle too. A handle is matched case-insensitively;
+  it resolves in the board the request already names — task placement only on the moved task's board, so a handle of
+  another board is "not a sibling" (`400`) as a foreign UUID would be — and otherwise across the principal's
+  workspaces (an API key: its workspace only). Keys are not unique across boards, so a handle that no card answers or
+  that several cards share resolves to `404 not_found`, the same error as an unknown UUID; it is never guessed.
+  Handles are not accepted for other ids: board and column ids, `assigneeId`, `commentsBefore`/`comments.before`,
+  column placement ids and `taskId` argument types elsewhere stay UUIDs. `BoardExport` carries no number; an imported
+  board numbers its tasks from 1 in file order.
 - **Events**: `limit` defaults to 500 (max 1000). If a page has `limit` events, page again with `since` = last seq.
   Creating a workspace records `member.added` for the owner (seq 1). `member.added` payload is a `Member`;
   `member.removed` payload is `{id: userId}`; for member events `entityId` = userId. Deleting a board emits only

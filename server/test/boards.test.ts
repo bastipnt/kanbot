@@ -264,6 +264,93 @@ describe("task handles", () => {
   });
 });
 
+describe("tasks by handle", () => {
+  const createBoard = async (user: any, ws: string, name: string) => {
+    const board = await api("POST", `/workspaces/${ws}/boards`, { token: user.token, body: { name } });
+    const snap = await api("GET", `/boards/${board.body.id}`, { token: user.token });
+    return { board: snap.body.board, cols: snap.body.columns };
+  };
+
+  test("read, update, assign, label, comment and move by handle; handles place tasks", async () => {
+    const { user, board, col } = await setup();
+    const a = await createTask(user, board.id, col("Backlog").id, "A");
+    const b = await createTask(user, board.id, col("Backlog").id, "B");
+    const c = await createTask(user, board.id, col("Backlog").id, "C");
+    expect([a.handle, b.handle, c.handle]).toEqual(["B-1", "B-2", "B-3"]);
+
+    const read = await api("GET", `/tasks/${b.handle}`, { token: user.token });
+    expect(read.body.task).toMatchObject({ id: b.id, handle: "B-2" });
+    expect((await api("GET", "/tasks/b-2", { token: user.token })).body.task.id).toBe(b.id);
+
+    const updated = await api("PATCH", `/tasks/${b.handle}`, {
+      token: user.token,
+      body: { title: "B2", labels: ["x"], assigneeId: user.id },
+    });
+    expect(updated.body).toMatchObject({ id: b.id, title: "B2", labels: ["x"], assigneeId: user.id });
+
+    const added = await api("POST", `/tasks/${b.handle}/labels/add`, { token: user.token, body: { labels: ["y"] } });
+    expect(added.body.labels).toEqual(["x", "y"]);
+    const removed = await api("POST", `/tasks/${b.handle}/labels/remove`, { token: user.token, body: { labels: ["x"] } });
+    expect(removed.body.labels).toEqual(["y"]);
+
+    const comment = await api("POST", `/tasks/${b.handle}/comments`, { token: user.token, body: { body: "note" } });
+    expect(comment.body).toMatchObject({ taskId: b.id, body: "note" });
+    expect((await api("GET", `/tasks/${b.handle}`, { token: user.token })).body.commentCount).toBe(1);
+
+    // Placement ids take handles: b then c queue up at the end of Done, a goes in front of b.
+    expect((await api("POST", `/tasks/${b.handle}/move`, { token: user.token, body: { columnId: "Done" } })).status).toBe(200);
+    const placed = await api("POST", `/tasks/${c.handle}/move`, {
+      token: user.token,
+      body: { columnId: "Done", afterId: b.handle },
+    });
+    expect(placed.status).toBe(200);
+    expect((await api("POST", `/tasks/${a.handle}/move`, { token: user.token, body: { columnId: "Done", beforeId: b.handle } })).status).toBe(200);
+    const done = await api("GET", `/boards/${board.id}`, { token: user.token });
+    expect(titlesIn(done.body, col("Done").id)).toEqual(["A", "B2", "C"]);
+
+    // A handle for a task on another board is not a sibling: same 400 as a foreign UUID.
+    const other = await createBoard(user, (await api("GET", "/workspaces", { token: user.token })).body[0].id, "Elsewhere");
+    expect((await api("POST", `/tasks/${a.handle}/move`, {
+      token: user.token,
+      body: { columnId: "Backlog", afterId: (await createTask(user, other.board.id, other.cols[0].id, "X")).handle },
+    })).status).toBe(400);
+
+    expect((await api("DELETE", `/tasks/${c.handle}`, { token: user.token })).status).toBe(204);
+    expect((await api("GET", `/tasks/${c.handle}`, { token: user.token })).status).toBe(404);
+  });
+
+  test("a malformed, unknown or ambiguous handle fails like an unknown UUID", async () => {
+    const { user, ws, board, col } = await setup();
+    await createTask(user, board.id, col("Backlog").id, "A");
+    const unknown = await api("GET", `/tasks/${Bun.randomUUIDv7()}`, { token: user.token });
+    expect(unknown.status).toBe(404);
+    expect(unknown.body).toEqual({ error: { code: "not_found", message: "Task not found" } });
+    for (const ref of ["B-99", "B-0", "nope", "B-", "B-1x", "B-99999999999999999999", "999"]) {
+      expect(await api("GET", `/tasks/${ref}`, { token: user.token })).toEqual(unknown);
+    }
+
+    // Two boards of one workspace can share a key: their numbers make the same handle, so it is ambiguous.
+    for (const name of ["Kanban Board", "Kanban Big"]) {
+      const made = await createBoard(user, ws.id, name);
+      const t = await createTask(user, made.board.id, made.cols[0].id, name);
+      expect(t.handle).toBe("KB-1");
+    }
+    expect(await api("GET", "/tasks/KB-1", { token: user.token })).toEqual(unknown);
+    const unique = await createTask(user, board.id, col("Backlog").id, "B");
+    expect((await api("GET", "/tasks/B-2", { token: user.token })).body.task.id).toBe(unique.id);
+  });
+
+  test("column placement still takes ids only", async () => {
+    const { user, board, col } = await setup();
+    const task = await createTask(user, board.id, col("Backlog").id, "A");
+    const res = await api("PATCH", `/columns/${col("Done").id}`, {
+      token: user.token,
+      body: { afterId: task.handle },
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("reading a board by column", () => {
   test("GET /boards/:id/columns has counts and no tasks; column tasks page by id or name", async () => {
     const { user, board, col } = await setup();

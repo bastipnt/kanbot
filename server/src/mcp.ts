@@ -61,7 +61,8 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
         "Kanbot is a kanban board. You act as an agent in one workspace. Typical flow: list_boards -> get_board " +
         "(columns with task counts) -> list_tasks (one column) -> act with create_task / move_task / update_task / " +
         "assign_task / add_comment. create_board makes a new board (default columns unless you pass names). " +
-        "Columns can be referenced by id or by case-insensitive name, e.g. 'Ready for Dev'.",
+        "Columns can be referenced by id or by case-insensitive name, e.g. 'Ready for Dev'. " +
+        "A taskId may also be the card's handle as shown by get_task, e.g. KAN-142.",
     },
   );
 
@@ -173,7 +174,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
         "includeDescription false leaves the description out. references lists the cards named in the description and " +
         "comments by #task:<id> or bare id (title, board, column; broken: true if a #task:<id> matches no card).",
       inputSchema: {
-        taskId: s.uuid.describe("Task id."),
+        taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."),
         comments: z
           .object({
             limit: z.number().int().min(1).max(500).describe("Newest comments to return."),
@@ -214,7 +215,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       title: "Update task",
       description: "Update a task's title, description, labels and/or due date. Only provided fields change.",
       inputSchema: {
-        taskId: s.uuid.describe("Task id."),
+        taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."),
         title: s.title.optional(),
         description: s.description.optional().describe("Markdown description (replaces the existing one)."),
         labels: s.labels.optional().describe("Complete new label list (replaces existing labels). To change single labels use add_labels / remove_labels."),
@@ -232,7 +233,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       description:
         "Add labels to a task without reading it first. Other labels are untouched and labels already present are " +
         "skipped, so concurrent edits are safe. Prefer this over update_task to add a label.",
-      inputSchema: { taskId: s.uuid.describe("Task id."), labels: s.labelDelta.describe("Labels to add.") },
+      inputSchema: { taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."), labels: s.labelDelta.describe("Labels to add.") },
       annotations: { idempotentHint: true },
     },
     ({ taskId, labels }) => run(() => tasks.changeLabels(p, taskId, "add", labels)),
@@ -245,7 +246,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       description:
         "Remove labels from a task without reading it first. Other labels are untouched and labels the task does " +
         "not have are ignored, so concurrent edits are safe.",
-      inputSchema: { taskId: s.uuid.describe("Task id."), labels: s.labelDelta.describe("Labels to remove.") },
+      inputSchema: { taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."), labels: s.labelDelta.describe("Labels to remove.") },
       annotations: { idempotentHint: true },
     },
     ({ taskId, labels }) => run(() => tasks.changeLabels(p, taskId, "remove", labels)),
@@ -259,10 +260,10 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
         'Move a task to a column on its board, e.g. column "Ready for Dev". By default the task goes to the bottom ' +
         "of the column; pass beforeTaskId/afterTaskId to place it relative to another task in that column.",
       inputSchema: {
-        taskId: s.uuid.describe("Task id."),
+        taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."),
         column: z.string().min(1).describe('Target column id or case-insensitive name, e.g. "Ready for Dev".'),
-        beforeTaskId: s.uuid.optional().describe("Place directly above this task in the target column."),
-        afterTaskId: s.uuid.optional().describe("Place directly below this task in the target column."),
+        beforeTaskId: s.taskRef.optional().describe("Place directly above this task in the target column (id or handle)."),
+        afterTaskId: s.taskRef.optional().describe("Place directly below this task in the target column (id or handle)."),
       },
     },
     ({ taskId, column, beforeTaskId, afterTaskId }) =>
@@ -275,7 +276,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       title: "Assign task",
       description: "Assign a task to a workspace member by email or name (case-insensitive), or unassign with null.",
       inputSchema: {
-        taskId: s.uuid.describe("Task id."),
+        taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."),
         assignee: z
           .string()
           .min(1)
@@ -292,7 +293,7 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
     {
       title: "Add comment",
       description: "Add a markdown comment to a task (e.g. a progress note or question).",
-      inputSchema: { taskId: s.uuid.describe("Task id."), body: s.commentBody.describe("Markdown comment body.") },
+      inputSchema: { taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."), body: s.commentBody.describe("Markdown comment body.") },
     },
     ({ taskId, body }) => run(() => tasks.addComment(p, taskId, body)),
   );

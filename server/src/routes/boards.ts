@@ -9,6 +9,8 @@ import * as columns from "../services/columns.ts";
 import * as tasks from "../services/tasks.ts";
 
 const placement = { beforeId: s.uuid.nullish(), afterId: s.uuid.nullish() };
+/** Task placement takes task references (ids or handles); column placement stays with column ids. */
+const taskPlacement = { beforeId: s.taskRef.nullish(), afterId: s.taskRef.nullish() };
 const nn = <T>(v: T | null | undefined) => v ?? undefined;
 
 /** `Content-Disposition` with an ASCII fallback and the exact UTF-8 name (RFC 6266). */
@@ -140,7 +142,7 @@ export const boardRoutes = new Hono<AppEnv>()
   )
   .post(
     "/tasks/:id/move",
-    validate("json", z.object({ columnId: z.string().min(1), ...placement })),
+    validate("json", z.object({ columnId: z.string().min(1), ...taskPlacement })),
     async (c) => {
       const b = c.req.valid("json");
       return c.json(

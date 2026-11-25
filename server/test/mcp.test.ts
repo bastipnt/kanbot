@@ -275,6 +275,47 @@ describe("mcp", () => {
     await client.close();
   });
 
+  test("task tools take a handle wherever they take a task id", async () => {
+    const { user, board, col, secret } = await agentSetup();
+    const a = await createTask(user, board.id, col("Backlog").id, "A");
+    const b = await createTask(user, board.id, col("Backlog").id, "B");
+    const client = await mcpClient(secret);
+
+    const got = await call(client, "get_task", { taskId: a.handle });
+    expect(got.isError).toBe(false);
+    expect(got.data.task).toMatchObject({ id: a.id, handle: "B-1" });
+
+    const updated = await call(client, "update_task", { taskId: a.handle, description: "by handle" });
+    expect(updated.data).toMatchObject({ id: a.id, description: "by handle" });
+    const assigned = await call(client, "assign_task", { taskId: a.handle, assignee: user.email });
+    expect(assigned.data.assigneeId).toBe(user.id);
+    const labelled = await call(client, "add_labels", { taskId: a.handle, labels: ["h"] });
+    expect(labelled.data.labels).toEqual(["h"]);
+    expect((await call(client, "remove_labels", { taskId: a.handle, labels: ["h"] })).data.labels).toEqual([]);
+    const comment = await call(client, "add_comment", { taskId: a.handle, body: "hello" });
+    expect(comment.data.taskId).toBe(a.id);
+
+    // Handles place tasks too: b goes to Done, a goes above it.
+    expect((await call(client, "move_task", { taskId: b.handle, column: "Done" })).isError).toBe(false);
+    const placed = await call(client, "move_task", { taskId: a.handle, column: "Done", beforeTaskId: b.handle });
+    expect(placed.isError).toBe(false);
+    const after = await call(client, "move_task", { taskId: a.handle, column: "Done", afterTaskId: b.handle });
+    expect(after.isError).toBe(false);
+    const snap = await call(client, "get_board", { board: board.id, includeTasks: true });
+    const done = snap.data.columns.find((c: any) => c.name === "Done").tasks.map((t: any) => t.title);
+    expect(done).toEqual(["B", "A"]);
+
+    // An unknown, malformed or ambiguous handle is the same error as an unknown UUID.
+    const unknown = await call(client, "get_task", { taskId: Bun.randomUUIDv7() });
+    expect(unknown.isError).toBe(true);
+    for (const taskId of ["B-99", "B-0", "nope", "B-", "B-1x", "999"]) {
+      expect(await call(client, "get_task", { taskId })).toEqual(unknown);
+    }
+    const badPlacement = await call(client, "move_task", { taskId: a.handle, column: "Done", beforeTaskId: "B-99" });
+    expect(badPlacement.isError).toBe(true);
+    await client.close();
+  });
+
   test("create_board seeds default or custom columns and records the agent", async () => {
     const { user, ws, secret } = await agentSetup();
     const client = await mcpClient(secret);

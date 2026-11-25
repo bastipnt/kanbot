@@ -161,6 +161,11 @@ export const tasks = pgTable(
     position: position(),
     assigneeId: uuid("assignee_id").references(() => users.id, { onDelete: "set null" }),
     labels: text("labels").array().notNull().default(sql`'{}'::text[]`),
+    /**
+     * Workflow state that agents keep on a card (step, branch, base); a string map, changed per key.
+     * Kept out of `BoardExport` on purpose.
+     */
+    metadata: jsonb("metadata").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
     dueAt: ts("due_at"),
     createdByType: actorTypeEnum("created_by_type").notNull(),
     createdById: uuid("created_by_id").notNull(),

@@ -67,6 +67,18 @@ import Testing
         #expect(task.handle == nil)
     }
 
+    @Test func decodesTaskMetadata() throws {
+        let json = #""metadata":{"step":"review","branch":"agent/x"},"#
+        let task = try KanbotJSON.decoder.decode(TaskItem.self, from: taskPayload(json))
+        #expect(task.metadata == ["step": "review", "branch": "agent/x"])
+    }
+
+    @Test func decodesTaskWithoutMetadataAsEmpty() throws {
+        // Older servers send no map; the card still decodes, with it empty.
+        let task = try KanbotJSON.decoder.decode(TaskItem.self, from: taskPayload(""))
+        #expect(task.metadata.isEmpty)
+    }
+
     @Test func decodesHello() {
         #expect(RealtimeDecoding.decode(Data(#"{"kind":"hello","latestSeq":42}"#.utf8)) == .hello(latestSeq: 42))
     }

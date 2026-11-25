@@ -19,7 +19,8 @@ Board         { id, workspaceId, name, createdAt, updatedAt }
 Column        { id, boardId, name, position, wipLimit /* int|null */ }
 Task          { id, handle /* "KEY-n", see "Task handles" */, boardId, columnId, title,
                 description /* markdown */, position, assigneeId /* uuid|null */,
-                labels /* string[] */, dueAt /* string|null */, createdBy: Actor, createdAt, updatedAt }
+                labels /* string[] */, metadata /* {key: value}, strings, empty by default */,
+                dueAt /* string|null */, createdBy: Actor, createdAt, updatedAt }
 TaskReference { id, broken, title?, boardId?, boardName?, columnId?, columnName? } /* see "Task references" */
 Comment       { id, taskId, body /* markdown */, actor: Actor, createdAt }
 Actor         { type: "user"|"agent", id, name }
@@ -75,6 +76,7 @@ Access token: JWT, 15 min. Refresh token: opaque, 30 days, rotated on use.
 | PATCH | /tasks/:id | any of {title, description, assigneeId, labels, dueAt} | Task |
 | POST | /tasks/:id/labels/add | {labels: string[]} (1-50) | Task |
 | POST | /tasks/:id/labels/remove | {labels: string[]} (1-50) | Task |
+| POST | /tasks/:id/metadata | {set?: {key: value}, unset?: string[]} (at least one) | Task |
 | POST | /tasks/:id/move | {columnId, beforeId?, afterId?} | Task |
 | DELETE | /tasks/:id | – | 204 |
 | POST | /tasks/:id/comments | {body} | Comment |
@@ -102,7 +104,8 @@ An API key acts as `Actor{type:"agent", name: apiKey.name}` in its workspace onl
 `POST /mcp` Streamable HTTP, auth with agent API key. Tools (thin wrappers over same services):
 `list_boards`, `get_board` (columns with `taskCount`, no tasks; `includeTasks: true` returns the full board as
 before), `list_tasks` (one column's tasks, paged), `search_tasks`, `get_task`, `create_task`, `update_task`,
-`add_labels`, `remove_labels`, `move_task` (`column` = id or case-insensitive name, e.g. "Ready for Dev"), `assign_task`
+`add_labels`, `remove_labels`, `set_task_metadata` (`set` and/or `unset`, see **Task metadata**), `move_task`
+(`column` = id or case-insensitive name, e.g. "Ready for Dev"), `assign_task`
 (by member email or name), `add_comment`, `create_column`, `reorder_columns`, `list_members`,
 `create_board`, `export_board`, `import_board`.
 
@@ -209,3 +212,13 @@ Non-breaking notes on behaviour the tables above leave open. Nothing here change
   Adding a label already present, or removing one that is absent, is a no-op (no duplicates; match is exact). Other
   labels keep their order; added ones go last. Labels are trimmed and de-duplicated; each is 1-64 characters, the
   list has 1-50 entries, and a task never exceeds 50 labels (`400` otherwise). Emits `task.updated` like `PATCH`.
+- **Task metadata**: every `Task` carries `metadata`, a string map that is `{}` on a new task. It is workflow state an
+  agent keeps on the card (step, branch, base) — `PATCH /tasks/:id` does not touch it, and the apps show it read only.
+  `POST /tasks/:id/metadata` (MCP `set_task_metadata {taskId, set?, unset?}`) sets the keys in `set` and removes the
+  keys in `unset` in one statement on the server, with no prior read, so two agents changing different keys at the
+  same time both land. A key in both lists: unset first, then set. Unsetting an absent key is a no-op. A body with
+  neither list, or with no key in them, is `400`. Keys are 1-64 characters of `a-z`, `0-9`, `.`, `_` and `-`; values
+  are strings of at most 512 characters; a task holds at most 50 entries (`400` otherwise, and the map is left
+  unchanged). Both return the `Task` and emit `task.updated` like `PATCH`. Metadata is not carried by `BoardExport`,
+  `search_tasks` does not match it, and `create_task` and `POST /boards/:id/tasks` do not accept it: it is written
+  only through this route (or the tool).

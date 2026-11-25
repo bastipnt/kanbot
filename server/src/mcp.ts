@@ -44,6 +44,7 @@ const brief = (t: Task) => ({
   columnId: t.columnId,
   assigneeId: t.assigneeId,
   labels: t.labels,
+  metadata: t.metadata,
   dueAt: t.dueAt,
 });
 
@@ -250,6 +251,25 @@ export function buildMcpServer(p: AgentPrincipal): McpServer {
       annotations: { idempotentHint: true },
     },
     ({ taskId, labels }) => run(() => tasks.changeLabels(p, taskId, "remove", labels)),
+  );
+
+  server.registerTool(
+    "set_task_metadata",
+    {
+      title: "Set task metadata",
+      description:
+        "Set and/or unset keys of a task's metadata map (workflow state such as step, branch or base) without " +
+        "reading the card first. Other keys are untouched, so concurrent agents changing different keys are safe. " +
+        "Keys are 1-64 characters of a-z, 0-9, '.', '_' and '-'; values are at most 512 characters; a task holds " +
+        "at most 50 entries. To clear a key list it in unset.",
+      inputSchema: {
+        taskId: s.taskRef.describe("Task id or handle, e.g. KAN-142."),
+        set: s.metadataSet.optional().describe('Keys to set, e.g. {"step": "review", "branch": "agent/x"}.'),
+        unset: s.metadataUnset.optional().describe("Keys to remove."),
+      },
+      annotations: { idempotentHint: true },
+    },
+    ({ taskId, set, unset }) => run(() => tasks.changeMetadata(p, taskId, { set, unset })),
   );
 
   server.registerTool(

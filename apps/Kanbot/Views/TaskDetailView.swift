@@ -162,6 +162,16 @@ struct TaskDetailView: View {
                 LabeledContent("Updated", value: task.updatedAt.formatted(date: .abbreviated, time: .shortened))
                 Button("Delete task", role: .destructive) { confirmDelete = true }
             }
+
+            if !task.metadata.isEmpty {
+                // Agent workflow state: written through the API/MCP only, so it is shown, not edited.
+                Section("Agent state") {
+                    ForEach(task.metadata.keys.sorted(), id: \.self) { key in
+                        LabeledContent(key, value: task.metadata[key] ?? "")
+                            .textSelection(.enabled)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .confirmationDialog("Delete this task?", isPresented: $confirmDelete) {

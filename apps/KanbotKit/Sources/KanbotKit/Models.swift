@@ -73,10 +73,31 @@ public struct TaskItem: Codable, Sendable, Hashable, Identifiable {
     public var position: String
     public var assigneeId: UUID?
     public var labels: [String]
+    /// Workflow state agents keep on the card (step, branch, base); shown read only in the apps.
+    public var metadata: [String: String]
     public var dueAt: Date?
     public let createdBy: Actor
     public let createdAt: Date
     public var updatedAt: Date
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        handle = try c.decodeIfPresent(String.self, forKey: .handle)
+        boardId = try c.decode(UUID.self, forKey: .boardId)
+        columnId = try c.decode(UUID.self, forKey: .columnId)
+        title = try c.decode(String.self, forKey: .title)
+        description = try c.decode(String.self, forKey: .description)
+        position = try c.decode(String.self, forKey: .position)
+        assigneeId = try c.decodeIfPresent(UUID.self, forKey: .assigneeId)
+        labels = try c.decode([String].self, forKey: .labels)
+        // Older servers do not send metadata.
+        metadata = try c.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
+        dueAt = try c.decodeIfPresent(Date.self, forKey: .dueAt)
+        createdBy = try c.decode(Actor.self, forKey: .createdBy)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+    }
 }
 
 public struct Comment: Codable, Sendable, Hashable, Identifiable {

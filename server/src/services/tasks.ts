@@ -276,6 +276,38 @@ export async function changeLabels(p: Principal, taskRef: string, op: "add" | "r
   });
 }
 
+const MAX_METADATA = 50;
+
+/**
+ * Sets and/or unsets metadata keys with one UPDATE on the jsonb column, so concurrent changes to different
+ * keys serialize on the row lock and all land. A key in both lists ends up set.
+ */
+export async function changeMetadata(
+  p: Principal,
+  taskRef: string,
+  input: { set?: Record<string, string>; unset?: string[] },
+): Promise<Task> {
+  const { task: found, workspaceId, boardName } = await resolveTask(p, taskRef);
+  const taskId = found.id;
+  const unset = [...new Set(input.unset ?? [])];
+  const set = input.set ?? {};
+  if (unset.length === 0 && Object.keys(set).length === 0) throw badRequest("set or unset is required");
+  return mutate(workspaceId, actorOf(p), async (tx, emit) => {
+    const next = sql`((${tasks.metadata} - ${textArray(unset)}) || ${JSON.stringify(set)}::jsonb)`;
+    const [updated] = await tx
+      .update(tasks)
+      .set({ metadata: next, updatedAt: new Date() })
+      .where(eq(tasks.id, taskId))
+      .returning();
+    if (!updated) throw notFound("Task");
+    if (Object.keys(updated.metadata).length > MAX_METADATA) {
+      throw badRequest(`A task can have at most ${MAX_METADATA} metadata entries`);
+    }
+    emit({ type: "task.updated", entityId: taskId, payload: toTask(updated, boardName) });
+    return toTask(updated, boardName);
+  });
+}
+
 /**
  * Move a task to a column (same board) and position. `column` is a column id or case-insensitive name.
  * Without beforeId/afterId the task goes to the end of the target column.

@@ -13,6 +13,17 @@ export const description = z.string().max(50_000);
 export const labels = z.array(z.string().trim().min(1).max(64)).max(50);
 /** Labels to add to or remove from a task (at least one). */
 export const labelDelta = labels.min(1);
+/**
+ * Metadata is the string map agents keep on a card (step, branch, base). Keys are lowercase words, so a
+ * human never has to read a stamp; a card holds at most 50 entries.
+ */
+export const metadataKey = z.string().regex(/^[a-z0-9._-]{1,64}$/, "keys are 1-64 of a-z, 0-9, . _ -");
+export const metadataSet = z.record(metadataKey, z.string().max(512));
+export const metadataUnset = z.array(metadataKey).max(50);
+/** A metadata change sets and/or unsets keys; a body with neither is rejected. */
+export const metadataPatch = z
+  .object({ set: metadataSet.optional(), unset: metadataUnset.optional() })
+  .refine((b) => b.set !== undefined || b.unset !== undefined, "set or unset is required");
 export const dueAt = z.iso.datetime({ offset: true }).nullable();
 export const wipLimit = z.number().int().min(0).max(10_000).nullable();
 export const email = z.email().max(320);

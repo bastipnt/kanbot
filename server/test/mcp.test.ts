@@ -57,6 +57,7 @@ describe("mcp", () => {
         "update_task",
         "add_labels",
         "remove_labels",
+        "set_task_metadata",
         "move_task",
         "assign_task",
         "add_comment",
@@ -272,6 +273,26 @@ describe("mcp", () => {
     expect(removed.data.labels).toEqual(["b", "c"]);
     const bad = await client.callTool({ name: "add_labels", arguments: { taskId: task.data.id, labels: [] } });
     expect(bad.isError).toBe(true);
+    await client.close();
+  });
+
+  test("set_task_metadata changes keys without reading the card and get_task returns them", async () => {
+    const { user, board, col, secret } = await agentSetup();
+    const task = await createTask(user, board.id, col("Backlog").id, "M");
+    const client = await mcpClient(secret);
+
+    const set = await call(client, "set_task_metadata", { taskId: task.handle, set: { step: "review", branch: "agent/m" } });
+    expect(set.isError).toBe(false);
+    expect(set.data.metadata).toEqual({ step: "review", branch: "agent/m" });
+
+    const got = await call(client, "get_task", { taskId: task.handle });
+    expect(got.data.task.metadata).toEqual({ step: "review", branch: "agent/m" });
+
+    const unset = await call(client, "set_task_metadata", { taskId: task.handle, unset: ["branch"] });
+    expect(unset.data.metadata).toEqual({ step: "review" });
+
+    const empty = await client.callTool({ name: "set_task_metadata", arguments: { taskId: task.handle } });
+    expect(empty.isError).toBe(true);
     await client.close();
   });
 

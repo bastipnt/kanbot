@@ -64,6 +64,7 @@ export const toTask = (t: TaskRow, boardName: string) => ({
   position: t.position,
   assigneeId: t.assigneeId,
   labels: t.labels,
+  metadata: t.metadata,
   dueAt: isoOrNull(t.dueAt),
   createdBy: { type: t.createdByType, id: t.createdById, name: t.createdByName } satisfies Actor,
   createdAt: iso(t.createdAt),

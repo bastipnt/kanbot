@@ -222,10 +222,15 @@ struct TaskCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(task.title)
-                .font(.body)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .multilineTextAlignment(.leading)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if let handle = task.handle {
+                    Text(handle).font(.caption).foregroundStyle(.secondary)
+                }
+                Text(task.title)
+                    .font(.body)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             if !task.labels.isEmpty {
                 FlowLabels(labels: task.labels)
             }

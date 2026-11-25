@@ -45,6 +45,28 @@ import Testing
         #expect(task.title == "Fix login" && task.labels == ["bug"] && task.dueAt == nil)
     }
 
+    /// A task payload, with `extra` spliced into the object so a field can be left out.
+    private func taskPayload(_ extra: String) -> Data {
+        Data("""
+        {"id":"0192f0c2-0000-7000-8000-000000000003","boardId":"0192f0c2-0000-7000-8000-000000000004",
+         "columnId":"0192f0c2-0000-7000-8000-000000000005",\(extra)"title":"Fix login","description":"",
+         "position":"a1","assigneeId":null,"labels":[],"dueAt":null,
+         "createdBy":{"type":"user","id":"0192f0c2-0000-7000-8000-000000000006","name":"Basti"},
+         "createdAt":"2026-09-30T12:00:00.000Z","updatedAt":"2026-09-30T12:01:00.000Z"}
+        """.utf8)
+    }
+
+    @Test func decodesTaskHandle() throws {
+        let task = try KanbotJSON.decoder.decode(TaskItem.self, from: taskPayload(#""handle":"KB-12","#))
+        #expect(task.handle == "KB-12")
+    }
+
+    @Test func decodesTaskWithoutHandle() throws {
+        // Older servers send no handle; the card still decodes.
+        let task = try KanbotJSON.decoder.decode(TaskItem.self, from: taskPayload(""))
+        #expect(task.handle == nil)
+    }
+
     @Test func decodesHello() {
         #expect(RealtimeDecoding.decode(Data(#"{"kind":"hello","latestSeq":42}"#.utf8)) == .hello(latestSeq: 42))
     }

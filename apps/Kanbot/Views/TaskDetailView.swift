@@ -69,6 +69,9 @@ struct TaskDetailView: View {
     private func form(_ task: TaskItem) -> some View {
         Form {
             Section {
+                if let handle = task.handle {
+                    Text(handle).font(.caption).foregroundStyle(.secondary)
+                }
                 TextField("Title", text: $title, axis: .vertical).font(.title3)
                 Picker("Status", selection: Binding(
                     get: { task.columnId },

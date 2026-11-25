@@ -64,6 +64,8 @@ public struct Actor: Codable, Sendable, Hashable {
 /// A kanban card. Named `TaskItem` to avoid clashing with Swift concurrency's `Task`.
 public struct TaskItem: Codable, Sendable, Hashable, Identifiable {
     public let id: UUID
+    /// `KEY-n`, e.g. `KB-12` (docs/api.md "Task handles"); older servers omit it.
+    public let handle: String?
     public let boardId: UUID
     public var columnId: UUID
     public var title: String
